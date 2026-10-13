@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "./AuthProvider";
 import { Logo } from "./Logo";
 import { GITHUB_REPO_URL } from "./SiteFooter";
@@ -21,7 +21,12 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
   const { user, signOut } = useAuth();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [imgError, setImgError] = useState(false);
   const createHref = user ? "/videos" : "/login?next=/videos";
+
+  useEffect(() => {
+    setImgError(false);
+  }, [user?.image]);
 
   return (
     <header className="site-header">
@@ -61,7 +66,16 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
         </Link>
         {user ? (
           <Link href="/videos" className="avatar" aria-label={t("myVideos")} title={user.name}>
-            {user.image ? <img src={user.image} alt="" /> : user.name.slice(0, 1).toUpperCase()}
+            {user.image && !imgError ? (
+              <img
+                src={user.image}
+                alt=""
+                referrerPolicy="no-referrer"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              (user.name || user.email || "U").slice(0, 1).toUpperCase()
+            )}
           </Link>
         ) : (
           <Link href="/login" className="btn ghost sm header-signin">
