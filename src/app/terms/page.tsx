@@ -17,8 +17,8 @@ const HIGHLIGHTS = [
   },
   {
     icon: "💻",
-    title: "Local Browser Rendering",
-    desc: "Projects, routes, and photos stay in your browser's local storage and render directly on your device.",
+    title: "Synced Routes & Local Rendering",
+    desc: "Routes and style settings sync across your devices, while personal stop photos and video rendering stay locally on your device.",
   },
 ];
 

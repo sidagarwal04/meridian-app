@@ -83,7 +83,7 @@ export const ARTICLES: Article[] = [
     tags: ["Features", "Announcement"],
     cover: "linear-gradient(150deg, #2a1d38, #8a4b2f 40%, #f0d7a4)",
     body: [
-      "Each stop can hold up to 12 photos (up to 100 photos per video). During the pause on that city, polaroid frames fan out beside the point and remain as mini thumbnails along the route.",
+      "Each stop can hold up to 12 photos (up to 100 photos per video). During the pause on that city, polaroid frames fan out beside the point and remain as mini thumbnails along the route. While your route and style settings sync across devices, personal stop photos stay strictly on the device where you added them.",
       "Add an emoji or custom caption to a stop label — useful for a meal, a hotel, or a trailhead.",
       "Soundtracks are 8 original beat-driven grooves synthesized on your device (Horizon Chill, Sunlit Tropics, Disco Strut, Night Drive 84, 8-Bit Odyssey, Campfire Acoustic, Rainy Window Lo-Fi, and Grand Vista), paired with per-leg transport sound effects for planes, trains, cars, boats, bikes, and footsteps.",
       "Choose a track and toggle transport SFX before export and they are mixed directly into the downloaded video.",

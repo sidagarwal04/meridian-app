@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useAuth } from "@/components/AuthProvider";
 import { GlobeStage } from "@/components/GlobeStage";
 import { PageShell } from "@/components/PageShell";
 import { getProject } from "@/lib/storage";
@@ -10,11 +11,13 @@ import type { Project } from "@/lib/types";
 
 export default function Page() {
   const params = useParams<{ id: string }>();
+  const { ready } = useAuth();
   const [project, setProject] = useState<Project | null | undefined>(undefined);
 
   useEffect(() => {
+    if (!ready) return;
     getProject(params.id).then((found) => setProject(found));
-  }, [params.id]);
+  }, [ready, params.id]);
 
   return (
     <PageShell>
@@ -22,7 +25,7 @@ export default function Page() {
         {project === undefined ? <p className="center">Loading…</p> : null}
         {project === null ? (
           <p className="center">
-            This video is stored in the browser that created it. <Link href="/videos">Back to your library</Link>
+            Project not found in your library or local browser storage. <Link href="/videos">Back to your library</Link>
           </p>
         ) : null}
         {project ? (

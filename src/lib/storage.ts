@@ -180,7 +180,16 @@ async function getLocalProjectRaw(id: string): Promise<Project | null> {
     const req = db.transaction("projects", "readonly").objectStore("projects").get(id);
     req.onsuccess = () => {
       const found = req.result as Project | undefined;
-      resolve(found ? normalizeProject(found) : null);
+      if (!found) {
+        resolve(null);
+        return;
+      }
+      const email = currentSessionEmail();
+      if (email && found.ownerEmail && found.ownerEmail.toLowerCase() !== email) {
+        resolve(null);
+        return;
+      }
+      resolve(normalizeProject(found));
     };
     req.onerror = () => reject(req.error);
   });
