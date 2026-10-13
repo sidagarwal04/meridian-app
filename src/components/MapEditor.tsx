@@ -3,6 +3,7 @@
 import { geoGraticule, geoNaturalEarth1, geoPath, type GeoProjection } from "d3-geo";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flagEmoji, greatCircle, haversineKm } from "@/lib/geo";
+import { drawSatelliteBiomeShading } from "@/lib/render";
 import { THEMES, transportMeta, type Leg, type Stop, type ThemeId } from "@/lib/types";
 import { loadCountries, type CountryShape } from "@/lib/world";
 
@@ -248,17 +249,58 @@ export function MapEditor({
 
       // Visited countries set
       const visitedCodes = new Set(validStops.map((s) => s.code).filter(Boolean));
+      const isSatelliteLook = theme === "earth" || theme === "satellite";
 
-      // Draw Countries
+      // Shallow coastal shelf glow
+      if (isSatelliteLook) {
+        ctx.save();
+        ctx.beginPath();
+        path({ type: "Sphere" } as never);
+        ctx.clip();
+        countries.forEach((country) => {
+          ctx.beginPath();
+          path(country.feature as never);
+          ctx.strokeStyle = "rgba(56, 189, 248, 0.14)";
+          ctx.lineWidth = Math.max(3, baseScale * safeZoom * 0.025);
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+
+      // Landmasses base fill + satellite biome terrain shading
+      ctx.save();
+      ctx.beginPath();
       countries.forEach((country) => {
+        path(country.feature as never);
+      });
+      ctx.fillStyle = palette.land;
+      ctx.fill();
+      ctx.clip();
+      drawSatelliteBiomeShading(ctx, projection, baseScale * safeZoom * 2.2, theme);
+      ctx.restore();
+
+      // Country borders + crisp white outlines on visited countries
+      const hotCountries: CountryShape[] = [];
+      countries.forEach((country) => {
+        const isVisited = Boolean(country.code && visitedCodes.has(country.code));
+        if (isVisited) hotCountries.push(country);
         ctx.beginPath();
         path(country.feature as never);
-        const isVisited = Boolean(country.code && visitedCodes.has(country.code));
-        ctx.fillStyle = isVisited ? palette.landHi : palette.land;
-        ctx.fill();
-        ctx.lineWidth = isVisited ? 0.85 : 0.55;
+        ctx.lineWidth = 0.55;
         ctx.strokeStyle = palette.border;
         ctx.stroke();
+      });
+
+      hotCountries.forEach((country) => {
+        ctx.save();
+        ctx.beginPath();
+        path(country.feature as never);
+        ctx.fillStyle = palette.landHi;
+        ctx.fill();
+        ctx.lineWidth = 1.25;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.88)";
+        ctx.stroke();
+        ctx.restore();
       });
 
       // Graticule
