@@ -14,12 +14,36 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://meridian.meetsid.dev"),
   title: {
     default: "Meridian — Travel map animations",
     template: "%s · Meridian",
   },
   description: "Turn your trip into a clear, beautiful map animation for sharing or presenting.",
   manifest: "/manifest.webmanifest",
+  openGraph: {
+    title: "Meridian — Travel map animations",
+    description:
+      "Turn every journey into a cinematic 3D map video. Plot flights, high-speed trains, road trips, and sea crossings on an interactive 3D globe.",
+    url: "https://meridian.meetsid.dev/",
+    siteName: "Meridian",
+    type: "website",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1564,
+        height: 676,
+        alt: "Meridian — Turn every journey into a cinematic 3D map video",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Meridian — Travel map animations",
+    description:
+      "Turn every journey into a cinematic 3D map video. Plot flights, high-speed trains, road trips, and sea crossings on an interactive 3D globe.",
+    images: ["/og-image.png"],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

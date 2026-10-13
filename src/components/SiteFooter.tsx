@@ -12,16 +12,8 @@ export function SiteFooter() {
 
   return (
     <footer className="site-footer">
-      <ul>
-        <li><Link href="/features">{t("features")}</Link></li>
-        <li><Link href="/pricing">{t("pricing")}</Link></li>
-        <li><Link href="/support">{t("support")}</Link></li>
-        <li><Link href="/terms">{t("terms")}</Link></li>
-        <li><Link href="/privacy">{t("privacy")}</Link></li>
-      </ul>
-
       <div className="footer-meta-row">
-        <div className="footer-gh-pill" role="group" aria-label="GitHub repository and issue tracker">
+        <div className="footer-gh-pill" role="navigation" aria-label="Footer links">
           <a
             href={GITHUB_REPO_URL}
             target="_blank"
@@ -40,6 +32,14 @@ export function SiteFooter() {
           >
             <span>{t("issuesFeatures")} ↗</span>
           </a>
+          <span className="footer-gh-sep" aria-hidden="true" />
+          <Link href="/terms" className="footer-gh-segment">
+            <span>{t("terms")}</span>
+          </Link>
+          <span className="footer-gh-sep" aria-hidden="true" />
+          <Link href="/privacy" className="footer-gh-segment">
+            <span>{t("privacy")}</span>
+          </Link>
         </div>
 
         <label className="lang">
