@@ -134,6 +134,23 @@ export function Studio() {
   }, [project]);
 
   useEffect(() => {
+    if (!preview && !lock) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (lock) {
+        setLock("");
+        return;
+      }
+      if (preview && !exporting) {
+        globe.current?.pause();
+        setPreview(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [preview, lock, exporting]);
+
+  useEffect(() => {
     const q = query.trim();
     if (q.length < 2) {
       setHits([]);
@@ -1571,8 +1588,19 @@ export function Studio() {
       </div>
 
       {preview ? (
-        <div className="modal" role="dialog" aria-modal="true" aria-label="Export Video">
-          <div className="modal-card export-modal-card">
+        <div
+          className="modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Export Video"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !exporting) {
+              globe.current?.pause();
+              setPreview(false);
+            }
+          }}
+        >
+          <div className="modal-card export-modal-card" onClick={(event) => event.stopPropagation()}>
             <header className="modal-header">
               <div>
                 <strong>Export Video · {project.title}</strong>
@@ -1604,104 +1632,121 @@ export function Studio() {
               />
             </div>
 
-            <div className="export-controls-row">
-              <div className="export-inline-group" role="radiogroup" aria-label="Export layout aspect ratio">
-                <span className="export-layout-label">Layout</span>
-                <div className="export-layout-options">
-                  {(
-                    [
-                      { id: "16:9", title: "16:9", desc: "Landscape" },
-                      { id: "9:16", title: "9:16", desc: "Vertical" },
-                      { id: "1:1", title: "1:1", desc: "Square" },
-                    ] as const
-                  ).map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={project.style.aspect === item.id}
-                      disabled={exporting}
-                      className={`export-layout-btn${project.style.aspect === item.id ? " active" : ""}`}
-                      onClick={() =>
-                        update((current) => ({
-                          ...current,
-                          style: { ...current.style, aspect: item.id },
-                        }))
-                      }
-                    >
-                      <span className={`aspect-frame-icon aspect-${item.id.replace(":", "-")}`} />
-                      <span className="export-layout-copy">
-                        <strong>{item.title}</strong>
-                        <small>{item.desc}</small>
-                      </span>
-                    </button>
-                  ))}
+            <div className="export-footer-bar">
+              <div className="export-footer-group">
+                <div className="export-control-item" role="radiogroup" aria-label="Export layout aspect ratio">
+                  <span className="export-control-label">Layout</span>
+                  <div className="export-segmented">
+                    {(
+                      [
+                        { id: "16:9", title: "16:9", desc: "Landscape" },
+                        { id: "9:16", title: "9:16", desc: "Vertical" },
+                        { id: "1:1", title: "1:1", desc: "Square" },
+                      ] as const
+                    ).map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={project.style.aspect === item.id}
+                        disabled={exporting}
+                        className={`export-seg-btn${project.style.aspect === item.id ? " active" : ""}`}
+                        onClick={() =>
+                          update((current) => ({
+                            ...current,
+                            style: { ...current.style, aspect: item.id },
+                          }))
+                        }
+                        title={`${item.title} ${item.desc}`}
+                      >
+                        <span className={`aspect-frame-icon sm aspect-${item.id.replace(":", "-")}`} />
+                        <span>{item.title}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                <span className="export-bar-divider" />
+
+                <label className="export-control-item">
+                  <span className="export-control-label">Format</span>
+                  <select
+                    className="export-format-select"
+                    value={project.style.format ?? "mp4"}
+                    disabled={exporting}
+                    onChange={(event) =>
+                      update((current) => ({
+                        ...current,
+                        style: { ...current.style, format: event.target.value as ExportFormat },
+                      }))
+                    }
+                  >
+                    {EXPORT_FORMATS.map((fmt) => (
+                      <option key={fmt.id} value={fmt.id}>
+                        {fmt.label} (.{fmt.ext})
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
 
-              <label className="export-inline-group export-format-group">
-                <span className="export-layout-label">Format</span>
-                <select
-                  className="export-format-select"
-                  value={project.style.format ?? "mp4"}
+              <div className="export-footer-actions">
+                <button
+                  type="button"
+                  className="export-action-btn"
+                  onClick={() => {
+                    unlockAudio();
+                    globe.current?.play();
+                  }}
                   disabled={exporting}
-                  onChange={(event) =>
-                    update((current) => ({
-                      ...current,
-                      style: { ...current.style, format: event.target.value as ExportFormat },
-                    }))
-                  }
                 >
-                  {EXPORT_FORMATS.map((fmt) => (
-                    <option key={fmt.id} value={fmt.id}>
-                      {fmt.label} (.{fmt.ext}) — {fmt.sub}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  ↻ Replay
+                </button>
+                <button
+                  type="button"
+                  className="export-action-btn"
+                  onClick={() => {
+                    unlockAudio();
+                    setPreviewAudio((v) => !v);
+                  }}
+                  disabled={exporting}
+                >
+                  {previewAudio ? "🔊 Sound" : "🔇 Muted"}
+                </button>
+                <button
+                  type="button"
+                  className={`export-action-btn${copied ? " copied" : ""}`}
+                  onClick={share}
+                >
+                  {copied ? "✓ Copied" : "🔗 Share"}
+                </button>
+                <button
+                  type="button"
+                  className="export-download-btn"
+                  onClick={renderVideo}
+                  disabled={exporting}
+                >
+                  {exporting
+                    ? `Rendering ${Math.round(progress * 100)}%…`
+                    : `⬇ Download ${(project.style.format ?? "mp4").toUpperCase()}`}
+                </button>
+              </div>
             </div>
-
-            <div className="modal-actions">
-              <button
-                className="btn ghost"
-                onClick={() => {
-                  unlockAudio();
-                  globe.current?.play();
-                }}
-                disabled={exporting}
-              >
-                ↻ Replay
-              </button>
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={() => {
-                  unlockAudio();
-                  setPreviewAudio((v) => !v);
-                }}
-                disabled={exporting}
-              >
-                {previewAudio ? "🔊 Sound On" : "🔇 Muted"}
-              </button>
-              <button className={`btn ghost${copied ? " copied" : ""}`} onClick={share}>
-                {copied ? "✓ Copied to clipboard" : "🔗 Copy share link"}
-              </button>
-              <button className="btn primary" onClick={renderVideo} disabled={exporting}>
-                {exporting
-                  ? `Rendering ${Math.round(progress * 100)}%…`
-                  : `⬇ Download ${(project.style.format ?? "mp4").toUpperCase()} (.${project.style.format ?? "mp4"} · ${project.style.aspect})`}
-              </button>
-            </div>
-            <p className="hint">
-              Records a high-definition {project.style.aspect} {(project.style.format ?? "mp4").toUpperCase()} (.{project.style.format ?? "mp4"}) file of this 3D globe animation directly in your browser.
-            </p>
           </div>
         </div>
       ) : null}
 
       {lock ? (
-        <div className="modal" role="dialog" aria-modal="true" aria-label="Limit reached">
-          <div className="modal-card narrow">
+        <div
+          className="modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Limit reached"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setLock("");
+          }}
+        >
+          <div className="modal-card narrow" onClick={(event) => event.stopPropagation()}>
             <h2>Limit reached</h2>
             <p>{lock}</p>
             <button className="btn primary wide" onClick={() => setLock("")}>
