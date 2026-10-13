@@ -154,23 +154,23 @@ async function readTelemetry(forceRefresh = false): Promise<StoredTelemetry> {
 async function writeTelemetry(state: StoredTelemetry): Promise<void> {
   state.updatedAt = Date.now();
 
-  // Keep daily buckets trimmed to most recent 120 days
+  // Retain 365 days of daily time-series buckets (lifetime totals are kept forever)
   const dayKeys = Object.keys(state.daily).sort();
-  if (dayKeys.length > 120) {
-    for (const oldKey of dayKeys.slice(0, dayKeys.length - 120)) {
+  if (dayKeys.length > 365) {
+    for (const oldKey of dayKeys.slice(0, dayKeys.length - 365)) {
       delete state.daily[oldKey];
     }
   }
 
-  // Cap arrays so state stays compact
-  if (state.knownVisitorIds.length > 10_000) {
-    state.knownVisitorIds = state.knownVisitorIds.slice(-10_000);
+  // Cap deduplication/log arrays so the JSON document remains fast and compact
+  if (state.knownVisitorIds.length > 25_000) {
+    state.knownVisitorIds = state.knownVisitorIds.slice(-25_000);
   }
-  if (state.knownTripIds.length > 10_000) {
-    state.knownTripIds = state.knownTripIds.slice(-10_000);
+  if (state.knownTripIds.length > 25_000) {
+    state.knownTripIds = state.knownTripIds.slice(-25_000);
   }
-  if (state.recentExports.length > 50) {
-    state.recentExports = state.recentExports.slice(0, 50);
+  if (state.recentExports.length > 200) {
+    state.recentExports = state.recentExports.slice(0, 200);
   }
 
   memoryCache = { state, fetchedAt: Date.now() };
@@ -419,6 +419,7 @@ export type AdminDashboardStats = {
       stopNames: string[];
       theme: string;
       aspect: string;
+      transports: string[];
       createdAt: number;
       updatedAt: number;
     }[];
@@ -522,16 +523,17 @@ export async function getAdminDashboardStats(): Promise<AdminDashboardStats> {
   const pageViewsByPath = Object.entries(state.pageViewsByPath)
     .map(([p, count]) => ({ path: p, count }))
     .sort((a, b) => b.count - a.count)
-    .slice(0, 15);
+    .slice(0, 20);
 
   const topReferrers = Object.entries(state.referrers)
     .map(([host, count]) => ({ host, count }))
     .sort((a, b) => b.count - a.count)
-    .slice(0, 10);
+    .slice(0, 15);
 
+  // Build up to 90 days series for charts & time-range filters
   const dailySeries: AdminDashboardStats["dailySeries"] = [];
   const now = new Date();
-  for (let i = 13; i >= 0; i--) {
+  for (let i = 89; i >= 0; i--) {
     const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i));
     const key = d.toISOString().slice(0, 10);
     const bucket = state.daily[key];
@@ -545,7 +547,7 @@ export async function getAdminDashboardStats(): Promise<AdminDashboardStats> {
     });
   }
 
-  const recentTrips = cloudProjects.slice(0, 25).map((p) => ({
+  const recentTrips = cloudProjects.slice(0, 100).map((p) => ({
     id: p.id,
     title: p.title || "Untitled trip",
     ownerEmail: p.ownerEmail || "unknown",
@@ -553,6 +555,7 @@ export async function getAdminDashboardStats(): Promise<AdminDashboardStats> {
     stopNames: (p.stops ?? []).map((s) => s.name).filter(Boolean),
     theme: p.style?.theme || "earth",
     aspect: p.style?.aspect || "16:9",
+    transports: Array.from(new Set((p.legs ?? []).map((l) => l.transport || "plane"))),
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,
   }));
@@ -581,7 +584,7 @@ export async function getAdminDashboardStats(): Promise<AdminDashboardStats> {
       byFormat: state.exportsByFormat,
       byAspect: state.exportsByAspect,
       byResolution: state.exportsByResolution,
-      recent: state.recentExports.slice(0, 25),
+      recent: state.recentExports.slice(0, 100),
     },
     dailySeries,
   };

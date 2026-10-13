@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "./AuthProvider";
 import { Logo } from "./Logo";
 import { GITHUB_REPO_URL } from "./SiteFooter";
@@ -23,11 +23,30 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const createHref = user ? "/videos" : "/login?next=/videos";
 
   useEffect(() => {
     setImgError(false);
   }, [user?.image]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
 
   return (
     <header className="site-header">
@@ -56,7 +75,7 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
           ) : null}
         </nav>
       ) : null}
-      <div className="header-actions">
+      <div className="header-actions" ref={menuRef}>
         <a
           href={GITHUB_REPO_URL}
           target="_blank"
@@ -71,7 +90,14 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
           ✦ {t("createVideo")}
         </Link>
         {user ? (
-          <Link href="/videos" className="avatar" aria-label={t("myVideos")} title={user.name}>
+          <button
+            type="button"
+            className="avatar"
+            aria-label={user.name || t("signOut")}
+            aria-expanded={open}
+            title={user.name}
+            onClick={() => setOpen((value) => !value)}
+          >
             {user.image && !imgError ? (
               <img
                 src={user.image}
@@ -82,48 +108,16 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
             ) : (
               (user.name || user.email || "U").slice(0, 1).toUpperCase()
             )}
-          </Link>
+          </button>
         ) : (
           <Link href="/login" className="btn ghost sm header-signin">
             {t("signIn")}
           </Link>
         )}
-        <button
-          className="icon-btn"
-          aria-label="Toggle menu"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <span />
-          <span />
-          <span />
-        </button>
-      </div>
-      {open ? (
-        <div className="menu-panel">
-          <Link href={createHref} onClick={() => setOpen(false)}>
-            🧭 {t("myVideos")}
-          </Link>
-          <Link href="/examples" onClick={() => setOpen(false)}>
-            🌍 {t("viewExamples")}
-          </Link>
-          <Link href="/features" onClick={() => setOpen(false)}>
-            ✨ {t("features")}
-          </Link>
-          <Link href="/pricing" onClick={() => setOpen(false)}>
-            💎 {t("pricing")}
-          </Link>
-          <Link href="/support" onClick={() => setOpen(false)}>
-            🛟 {t("support")}
-          </Link>
-          {isAdminEmail(user?.email) ? (
-            <Link href="/admin" onClick={() => setOpen(false)}>
-              🔒 Private Admin Stats
-            </Link>
-          ) : null}
-          <div className="menu-divider" />
-          {user ? (
+        {user && open ? (
+          <div className="menu-panel">
             <button
+              type="button"
               onClick={() => {
                 signOut();
                 setOpen(false);
@@ -131,13 +125,9 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
             >
               ↪ {t("signOut")}
             </button>
-          ) : (
-            <Link href="/login" onClick={() => setOpen(false)}>
-              🔑 {t("signIn")}
-            </Link>
-          )}
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+      </div>
     </header>
   );
 }
