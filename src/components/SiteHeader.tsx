@@ -5,11 +5,13 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "./AuthProvider";
 import { Logo } from "./Logo";
+import { usePwa } from "./PwaManager";
 import { useI18n } from "@/lib/i18n";
 
 export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
   const { t } = useI18n();
   const { user, signOut } = useAuth();
+  const { isStandalone, canInstall, triggerInstall } = usePwa();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const createHref = user ? "/videos" : "/login?next=/videos";
@@ -37,6 +39,16 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
         </nav>
       ) : null}
       <div className="header-actions">
+        {canInstall ? (
+          <button
+            type="button"
+            className="btn ghost sm header-install-btn"
+            onClick={() => void triggerInstall()}
+            title={t("installApp")}
+          >
+            📲 {t("installApp")}
+          </button>
+        ) : null}
         <Link href={createHref} className="btn primary sm header-cta">
           ✦ {t("createVideo")}
         </Link>
@@ -80,6 +92,17 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
           <Link href="/contacts" onClick={() => setOpen(false)}>
             ✉️ {t("contacts")}
           </Link>
+          {!isStandalone ? (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                void triggerInstall();
+              }}
+            >
+              📲 {t("installApp")}
+            </button>
+          ) : null}
           <div className="menu-divider" />
           {user ? (
             <button

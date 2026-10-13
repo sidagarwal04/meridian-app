@@ -2,9 +2,12 @@
 
 import Link from "next/link";
 import { LANGUAGES, useI18n } from "@/lib/i18n";
+import { usePwa } from "./PwaManager";
 
 export function SiteFooter() {
   const { t, lang, setLang } = useI18n();
+  const { isStandalone, triggerInstall } = usePwa();
+
   return (
     <footer className="site-footer">
       <ul>
@@ -14,6 +17,17 @@ export function SiteFooter() {
         <li><Link href="/contacts">{t("contacts")}</Link></li>
         <li><Link href="/terms">{t("terms")}</Link></li>
         <li><Link href="/privacy">{t("privacy")}</Link></li>
+        {!isStandalone ? (
+          <li>
+            <button
+              type="button"
+              className="footer-link-btn"
+              onClick={() => void triggerInstall()}
+            >
+              📲 {t("installApp")}
+            </button>
+          </li>
+        ) : null}
       </ul>
       <label className="lang">
         <span className="sr-only">Language</span>

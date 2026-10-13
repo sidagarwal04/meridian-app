@@ -35,6 +35,7 @@ const DICTS: Record<string, Record<string, string>> = {
     featuresTitle: "Meridian features",
     featuresLead: "Practical guides for travel map videos, route styling, and animation controls.",
     filterTags: "Filter by tags:",
+    installApp: "Install as an app",
   },
   es: {
     create: "Route Studio",
@@ -66,6 +67,7 @@ const DICTS: Record<string, Record<string, string>> = {
     featuresTitle: "Funciones de Meridian",
     featuresLead: "Guías para vídeos de mapas, estilo de ruta y el plan Pro.",
     filterTags: "Filtrar por etiquetas:",
+    installApp: "Instalar como app",
   },
   fr: {
     create: "Studio d’itinéraire",
@@ -97,6 +99,7 @@ const DICTS: Record<string, Record<string, string>> = {
     featuresTitle: "Fonctions Meridian",
     featuresLead: "Guides pour les vidéos de cartes, le style et Pro.",
     filterTags: "Filtrer par tags :",
+    installApp: "Installer l’application",
   },
   de: {
     create: "Routen-Studio",
@@ -122,6 +125,7 @@ const DICTS: Record<string, Record<string, string>> = {
     featuresTitle: "Meridian Funktionen",
     featuresLead: "Anleitungen für Kartenvideos, Stil und Pro.",
     filterTags: "Nach Tags filtern:",
+    installApp: "Als App installieren",
   },
   pt: {
     create: "Route Studio",
@@ -147,6 +151,7 @@ const DICTS: Record<string, Record<string, string>> = {
     featuresTitle: "Recursos Meridian",
     featuresLead: "Guias para vídeos de mapa, estilo e Pro.",
     filterTags: "Filtrar por etiquetas:",
+    installApp: "Instalar como app",
   },
   hi: {
     create: "रूट स्टूडियो",
@@ -172,6 +177,7 @@ const DICTS: Record<string, Record<string, string>> = {
     featuresTitle: "Meridian सुविधाएँ",
     featuresLead: "मैप वीडियो, स्टाइल और Pro के लिए गाइड।",
     filterTags: "टैग से छानें:",
+    installApp: "ऐप के रूप में इंस्टॉल करें",
   },
   ja: {
     create: "ルートスタジオ",
@@ -197,6 +203,7 @@ const DICTS: Record<string, Record<string, string>> = {
     featuresTitle: "Meridian の機能",
     featuresLead: "地図動画、スタイル、Pro のガイド。",
     filterTags: "タグで絞り込み:",
+    installApp: "アプリとしてインストール",
   },
   zh: {
     create: "路线工作室",
@@ -222,6 +229,7 @@ const DICTS: Record<string, Record<string, string>> = {
     featuresTitle: "Meridian 功能",
     featuresLead: "地图视频、样式与 Pro 的实用指南。",
     filterTags: "按标签筛选：",
+    installApp: "安装为应用",
   },
   ko: {
     create: "루트 스튜디오",
@@ -247,6 +255,7 @@ const DICTS: Record<string, Record<string, string>> = {
     featuresTitle: "Meridian 기능",
     featuresLead: "지도 영상, 스타일, Pro 가이드.",
     filterTags: "태그로 필터:",
+    installApp: "앱으로 설치",
   },
   ar: {
     create: "استوديو المسار",
@@ -272,6 +281,7 @@ const DICTS: Record<string, Record<string, string>> = {
     featuresTitle: "ميزات Meridian",
     featuresLead: "أدلة لفيديو الخرائط والتنسيق وPro.",
     filterTags: "تصفية بالوسوم:",
+    installApp: "تثبيت كتطبيق",
   },
 };
 

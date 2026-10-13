@@ -8,6 +8,7 @@ Plot the places you visited, pick how you traveled between each leg, attach pola
 
 ## Features
 
+- **Installable Mobile & Desktop PWA (Auto-Updating)** — Install Meridian directly to your home screen or desktop via the built-in **"📲 Install as an app"** prompt (supports native Android/Chrome/Edge install prompts and guided iOS Safari Home Screen installation) with an auto-updating Service Worker that activates new deployments automatically.
 - **Cross-Device Route Sync & Local Photo Privacy** — Routes, stops, transport modes, and style settings sync across your laptop and mobile devices via your Google account (backed by Netlify Blobs and local IndexedDB offline caching). Personal photos attached to stops are never uploaded to any server and stay strictly in the browser where they were added.
 - **Interactive 2D Route Studio & 3D WebGL Globe** — Plan routes on a fast 2D map editor with country/territory highlighting, drag-and-drop stop ordering, and instant preview on a 3D globe with satellite imagery and topographic relief shading.
 - **5 Cartographic Themes & Custom Palettes** — Switch between `Earth` (3D satellite relief), `Eco`, `Night`, `Paper`, and `Cyber`, or customize ocean/backdrop, route line, and callout label hex colors.
