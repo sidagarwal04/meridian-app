@@ -158,7 +158,10 @@ export function ExamplesView() {
                 </div>
                 <div className="example-copy">
                   <div className="card-meta-row">
-                    <span>{template.project.stops.length} stops</span>
+                    <span>
+                      {countVisitedPlaces(template.project.stops)}{" "}
+                      {countVisitedPlaces(template.project.stops) === 1 ? "place" : "places"}
+                    </span>
                     <span>·</span>
                     <span>
                       {template.project.stops

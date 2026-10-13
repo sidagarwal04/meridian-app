@@ -22,6 +22,7 @@ export type Frame = {
   outroProgress: number;
   photoStop: number | null;
   photoU: number;
+  photoReveal: number;
   distanceKm: number | null;
   showUnderlay: number;
 };
@@ -126,7 +127,7 @@ function dwellOf(project: Project, index: number) {
   const stop = project.stops[index];
   if (!stop) return 0.65;
   const photos = stop.photos.length;
-  return Math.max(stop.dwellSec || 1.1, photos ? 1.85 + photos * 0.95 : 0.85);
+  return Math.max(stop.dwellSec || 1.1, photos ? 2.4 + photos * 1.0 : 0.85);
 }
 
 export function animationDuration(project: Project, paths: [number, number][][]) {
@@ -160,6 +161,7 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     outroProgress: 0,
     photoStop: null,
     photoU: 0,
+    photoReveal: 0,
     distanceKm: null,
     showUnderlay: 0.14,
   };
@@ -206,8 +208,9 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
       full,
       labelIndexes: project.style.labels === "always" ? stops.map((_, i) => i) : [0],
       activeStopIndex: 0,
-      photoStop: rawU > 0.62 && stops[0]?.photos.length ? 0 : null,
+      photoStop: null,
       photoU: 0,
+      photoReveal: 0,
       showUnderlay: 0.1 * e,
       head: [stops[0].lon, stops[0].lat],
     };
@@ -246,6 +249,13 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     const dwellBoost = 1 + 0.05 * Math.sin(rawU * Math.PI);
     const dists = stops.map((_, i) => (i > 0 && i <= seg.index ? legKms[i - 1] || null : null));
     const isFinalStopDwell = seg.index === stops.length - 1 && stops.length > 1;
+    const hasPhotos = stops[seg.index].photos.length > 0;
+    // Wait until the arrival pin & location label have been clearly visible (~28% into dwell) before popping in photos
+    const delayFrac = 0.28;
+    const showPhotos = hasPhotos && rawU >= delayFrac;
+    const adjPhotoU = showPhotos ? Math.min(0.999, (rawU - delayFrac) / (1 - delayFrac)) : 0;
+    const enterAlpha = showPhotos ? smooth(Math.min(1, (rawU - delayFrac) / 0.14)) : 0;
+    const exitAlpha = showPhotos && rawU > 0.9 ? smooth(Math.max(0, (1 - rawU) / 0.1)) : 1;
     return {
       ...empty,
       camera: { ...baseCam, factor: baseCam.factor * dwellBoost },
@@ -258,8 +268,9 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
       totalDistanceKm:
         isFinalStopDwell && project.style.units !== "none" && totalRouteKm >= 1 ? totalRouteKm : null,
       outroProgress: isFinalStopDwell ? smooth(Math.max(0, (rawU - 0.35) / 0.65)) * 0.85 : 0,
-      photoStop: stops[seg.index].photos.length ? seg.index : null,
-      photoU: rawU,
+      photoStop: showPhotos ? seg.index : null,
+      photoU: adjPhotoU,
+      photoReveal: enterAlpha * exitAlpha,
       showUnderlay: 0.15,
     };
   }
@@ -296,14 +307,6 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     return null;
   });
 
-  const legPhotoStop =
-    rawU < 0.14 && stops[seg.index]?.photos.length
-      ? seg.index
-      : rawU > 0.86 && stops[seg.index + 1]?.photos.length
-      ? seg.index + 1
-      : null;
-  const legPhotoU = rawU < 0.14 ? 0.99 : 0;
-
   return {
     camera: { lon: head[0], lat: head[1], factor: camFactor },
     revealed: [...full.slice(0, seg.index), slicePath(path, u)],
@@ -320,8 +323,9 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     legDistances: project.style.units === "none" ? stops.map(() => null) : dists,
     totalDistanceKm: null,
     outroProgress: 0,
-    photoStop: legPhotoStop,
-    photoU: legPhotoU,
+    photoStop: null,
+    photoU: 0,
+    photoReveal: 0,
     distanceKm: project.style.units === "none" ? null : curDist,
     showUnderlay: 0.14,
   };
@@ -1181,15 +1185,36 @@ export function drawFrame(
       const clusterW = cols * cardW + (cols - 1) * gapX;
       const clusterH = rows * cardH + (rows - 1) * gapY;
 
-      // Place the Polaroid showcase to the right of the stop pin if there's room, otherwise to the left
+      // Place the Polaroid showcase so it never covers the stop pin or its location callout card
       const offsetX = Math.max(26, Math.round(w * 0.038));
-      const preferRight = xy[0] + offsetX + clusterW < w - 16;
-      const rawX = preferRight ? xy[0] + offsetX : xy[0] - offsetX - clusterW;
-      const clusterX = Math.min(w - clusterW - 16, Math.max(16, rawX));
-      const clusterY = Math.min(h - clusterH - 64, Math.max(54, xy[1] - clusterH * 0.5));
+      let clusterX: number;
+      let clusterY: number;
+      if (isPortraitCanvas) {
+        // In 9:16 vertical layout, center horizontally and place cleanly below or above the stop & label
+        clusterX = Math.min(w - clusterW - 16, Math.max(16, xy[0] - clusterW / 2));
+        const spaceBelow = h - xy[1] - 72;
+        const offsetBelow = Math.max(58, Math.round(h * 0.068));
+        const offsetAbove = Math.max(76, Math.round(h * 0.088));
+        if (spaceBelow >= clusterH + offsetBelow || xy[1] < h * 0.52) {
+          clusterY = Math.min(h - clusterH - 58, xy[1] + offsetBelow);
+        } else {
+          clusterY = Math.max(56, xy[1] - offsetAbove - clusterH);
+        }
+      } else {
+        const preferRight = xy[0] + offsetX + clusterW < w - 16;
+        const rawX = preferRight ? xy[0] + offsetX : xy[0] - offsetX - clusterW;
+        clusterX = Math.min(w - clusterW - 16, Math.max(16, rawX));
+        clusterY = Math.min(h - clusterH - 64, Math.max(54, xy[1] - clusterH * 0.5));
+      }
+
+      const reveal = frame.photoReveal ?? 1;
+      const popScale = 0.88 + 0.12 * reveal;
 
       const clusterCenterX = clusterX + clusterW / 2;
       const clusterCenterY = clusterY + clusterH / 2;
+
+      ctx.save();
+      ctx.globalAlpha = reveal;
 
       // Dashed leader line connecting the stop pin to the Polaroid showcase
       ctx.save();
@@ -1223,7 +1248,7 @@ export function drawFrame(
         const cxCard = rowStartX + col * (cardW + gapX) + cardW / 2;
         const cyCard = clusterY + row * (cardH + gapY) + cardH / 2;
         const isCurrent = count > 1 && idx === activeIdx;
-        const scale = isCurrent ? 1.045 : 1;
+        const scale = (isCurrent ? 1.045 : 1) * popScale;
         const tilt = count === 1 ? -0.022 : tilts[idx % tilts.length];
 
         ctx.save();
@@ -1290,6 +1315,7 @@ export function drawFrame(
 
         ctx.restore();
       });
+      ctx.restore();
     }
   }
 

@@ -1,4 +1,4 @@
-import { defaultStyle, makeStop, uid, type Project, type Style, type Transport } from "./types";
+import { THEMES, defaultStyle, makeStop, uid, type Project, type Style, type ThemeId, type Transport } from "./types";
 
 type Packed = {
   t: string;
@@ -32,6 +32,8 @@ export function decodeRoute(code: string): Project | null {
     const stops = data.s.map(([name, country, codeName, lat, lon, emoji]) =>
       makeStop({ name, country, code: codeName, lat, lon, emoji })
     );
+    const mergedStyle = { ...defaultStyle(), ...data.y, music: data.y?.music || "ambient" };
+    const validTheme: ThemeId = mergedStyle.theme in THEMES ? mergedStyle.theme : "earth";
     return {
       id: uid("shared"),
       title: data.t || "Shared route",
@@ -39,7 +41,7 @@ export function decodeRoute(code: string): Project | null {
       updatedAt: Date.now(),
       stops,
       legs: stops.slice(1).map((_, index) => ({ transport: data.l?.[index] || "plane" })),
-      style: { ...defaultStyle(), ...data.y, music: data.y?.music || "ambient" },
+      style: { ...mergedStyle, theme: validTheme },
     };
   } catch {
     return null;

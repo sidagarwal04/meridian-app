@@ -28,7 +28,9 @@ export default function Page() {
         {project ? (
           <>
             <h1>{project.title}</h1>
-            <GlobeStage project={project} play="auto" enableAudio pro={project.style.resolution === "1080"} />
+            <div className={`export-stage-viewport aspect-${project.style.aspect.replace(":", "-")}`}>
+              <GlobeStage project={project} play="auto" enableAudio pro />
+            </div>
             <p className="center">
               <Link className="btn ghost" href={`/studio/${project.id}`}>
                 Edit

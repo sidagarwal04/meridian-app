@@ -241,33 +241,38 @@ export function HomeView() {
         </div>
 
         <div className="example-grid">
-          {TEMPLATES.slice(0, 3).map((template) => (
-            <div key={template.id} className="example-card showcase-card">
-              <div className="card-globe-preview">
-                <GlobeStage project={template.project} play="freeze-end" pro size={{ w: 640, h: 360 }} />
-                <span className="card-theme-badge">{THEMES[template.project.style.theme].label}</span>
-              </div>
-              <div className="example-copy">
-                <div className="card-meta-row">
-                  <span>{template.project.stops.length} stops</span>
-                  <span>·</span>
-                  <span>
-                    {template.project.stops
-                      .slice(0, 3)
-                      .map((s) => (s.code ? flagEmoji(s.code) : ""))
-                      .join(" ")}
-                  </span>
+          {TEMPLATES.slice(0, 3).map((template) => {
+            const visited = countVisitedPlaces(template.project.stops);
+            return (
+              <div key={template.id} className="example-card showcase-card">
+                <div className="card-globe-preview">
+                  <GlobeStage project={template.project} play="freeze-end" pro size={{ w: 640, h: 360 }} />
+                  <span className="card-theme-badge">{THEMES[template.project.style.theme].label}</span>
                 </div>
-                <h2>{template.title}</h2>
-                <p>{template.blurb}</p>
-                <div className="card-footer-actions">
-                  <Link href={createHref} className="btn ghost sm wide">
-                    Open in Studio →
-                  </Link>
+                <div className="example-copy">
+                  <div className="card-meta-row">
+                    <span>
+                      {visited} {visited === 1 ? "place" : "places"}
+                    </span>
+                    <span>·</span>
+                    <span>
+                      {template.project.stops
+                        .slice(0, 3)
+                        .map((s) => (s.code ? flagEmoji(s.code) : ""))
+                        .join(" ")}
+                    </span>
+                  </div>
+                  <h2>{template.title}</h2>
+                  <p>{template.blurb}</p>
+                  <div className="card-footer-actions">
+                    <Link href={createHref} className="btn ghost sm wide">
+                      Open in Studio →
+                    </Link>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 

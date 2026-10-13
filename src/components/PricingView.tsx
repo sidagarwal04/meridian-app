@@ -8,12 +8,12 @@ const PERKS = [
   {
     icon: "🎬",
     title: "Unlimited 1080p 60fps Exports",
-    desc: "Render crisp Full HD WebM animations in 16:9 landscape, 9:16 vertical, or 1:1 square with zero credit limits.",
+    desc: "Render crisp Full HD MP4, MOV, WebM, MKV, or animated GIF routes in 16:9 landscape, 9:16 vertical, or 1:1 square with zero credit limits.",
   },
   {
     icon: "📍",
     title: "Up to 100 Places & 100 Photos",
-    desc: "Plot multi-continent expeditions and attach up to 4 polaroid photos per stop that pop up during camera pauses.",
+    desc: "Plot multi-continent expeditions and attach up to 12 polaroid photos per stop that pop up during camera pauses.",
   },
   {
     icon: "🚄",
@@ -28,12 +28,12 @@ const PERKS = [
   {
     icon: "🎨",
     title: "5 Cartographic Themes & Custom Colors",
-    desc: "Switch between Earth, Night, Eco, Paper, and Satellite palettes — or pick custom route and backdrop hex colors.",
+    desc: "Switch between Earth, Eco, Night, Paper, and Cyber palettes — or pick custom route, backdrop, and label hex colors.",
   },
   {
     icon: "🎵",
-    title: "Synthesized Audio & No Forced Watermark",
-    desc: "Mix in browser-generated Ambient, Synthwave, Cinematic, or Folk audio tracks and toggle the Meridian mark freely.",
+    title: "Synthesized Audio & Transport SFX",
+    desc: "Mix in 8 procedural soundtracks and per-leg vehicle sound effects (engines, rails, sails, footsteps), and toggle the Meridian mark freely.",
   },
 ];
 
@@ -67,7 +67,7 @@ export function PricingView() {
             </p>
             <div className="hero-actions">
               <Link className="btn primary lg" href={ctaHref}>
-                ✦ {user ? "Open My Videos Library →" : "Sign in with Google — Free →"}
+                ✦ {user ? "Open My Expeditions →" : "Sign in with Google — Free →"}
               </Link>
               <Link className="btn ghost lg" href="/examples">
                 Watch Examples

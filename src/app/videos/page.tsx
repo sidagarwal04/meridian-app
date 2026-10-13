@@ -167,7 +167,8 @@ export default function Page() {
                 <div>
                   <strong>{tpl.title}</strong>
                   <span>
-                    {tpl.project.stops.length} stops ·{" "}
+                    {countVisitedPlaces(tpl.project.stops)}{" "}
+                    {countVisitedPlaces(tpl.project.stops) === 1 ? "place" : "places"} ·{" "}
                     {tpl.project.stops
                       .slice(0, 3)
                       .map((s) => s.name)

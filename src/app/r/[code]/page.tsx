@@ -16,7 +16,9 @@ export default function Page() {
         {project ? (
           <>
             <h1>{project.title}</h1>
-            <GlobeStage project={project} play="auto" enableAudio pro={false} />
+            <div className={`export-stage-viewport aspect-${project.style.aspect.replace(":", "-")}`}>
+              <GlobeStage project={project} play="auto" enableAudio pro />
+            </div>
             <p className="center">
               <Link className="pill" href="/login?next=/videos">
                 Create your own

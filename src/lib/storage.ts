@@ -1,17 +1,16 @@
-import { THEMES, createProject, type Account, type Project, type ThemeId, type User } from "./types";
+import { THEMES, createProject, defaultStyle, type Account, type Project, type ThemeId, type User } from "./types";
 
 function normalizeProject(project: Project): Project {
-  const rawTheme = project?.style?.theme as string | undefined;
-  if (rawTheme && !(rawTheme in THEMES)) {
-    return {
-      ...project,
-      style: {
-        ...project.style,
-        theme: "earth" as ThemeId,
-      },
-    };
-  }
-  return project;
+  const mergedStyle = { ...defaultStyle(), ...(project?.style ?? {}) };
+  const rawTheme = mergedStyle.theme as string | undefined;
+  const validTheme: ThemeId = rawTheme && rawTheme in THEMES ? (rawTheme as ThemeId) : "earth";
+  return {
+    ...project,
+    style: {
+      ...mergedStyle,
+      theme: validTheme,
+    },
+  };
 }
 
 const SESSION = "meridian-session";

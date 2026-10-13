@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Support" };
 const FAQ = [
   [
     "How do I create a travel map video?",
-    "Sign in with Google, open My Videos, and click Create Video. Search cities or click directly on the interactive globe to add stops, choose transport icons between stops, and click Preview or Export Video.",
+    "Sign in with Google, open My Expeditions, and click Create Video. Search cities or click directly on the interactive globe to add stops, choose transport icons between stops, and click Preview or Export Video.",
   ],
   [
     "How do I reorder or remove stops on the route?",
@@ -15,7 +15,7 @@ const FAQ = [
   ],
   [
     "What if I pan or zoom the map and lose my route?",
-    "Use the ⊡ Fit Route or 🌐 World View buttons in the top-right corner of the Studio map at any time to re-center the globe. Switch to '✋ Pan / Select only' mode in the top-left toolbar if you want to explore the map without adding pins on click.",
+    "Use the ⊡ Fit Route or 🌐 World View buttons in the top-right corner of the Studio map at any time to re-center the globe. Switch to '✋ Orbit / Select' mode in the top-left toolbar if you want to explore the map without adding pins on click.",
   ],
   [
     "Where are my videos and photos stored?",
@@ -26,8 +26,8 @@ const FAQ = [
     "Yes. After signing in with Google, all 12 transport modes, 1080p 60fps exports, GPX/KML/GeoJSON imports, custom colors, and synthesized soundtracks are completely free.",
   ],
   [
-    "What video format is downloaded?",
-    "Exports record a high-bitrate WebM video directly from the HTML5 canvas with mixed audio. It plays in modern browsers and uploads directly to YouTube, Instagram, TikTok, and presentation tools.",
+    "What video formats can I download?",
+    "You can export in MP4 (recommended for universal playback), QuickTime MOV, WebM, Matroska MKV, or animated GIF in 16:9 landscape, 9:16 vertical, or 1:1 square — recorded directly from the canvas with mixed soundtrack and transport sound effects.",
   ],
 ];
 

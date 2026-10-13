@@ -103,6 +103,8 @@ export function Studio() {
   const [previewingMusic, setPreviewingMusic] = useState<Project["style"]["music"] | null>(null);
   const [stageAudio, setStageAudio] = useState(true);
   const [previewAudio, setPreviewAudio] = useState(true);
+  const exportingRef = useRef(false);
+  const lastProgressPctRef = useRef(-1);
   const sfxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const musicTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const musicStopRef = useRef<(() => void) | null>(null);
@@ -111,6 +113,18 @@ export function Studio() {
   const inlineGlobe = useRef<GlobeHandle>(null);
   const limits = limitsFor(null);
   const booted = useRef(false);
+
+  exportingRef.current = exporting;
+
+  useEffect(
+    () => () => {
+      if (sfxTimer.current) clearTimeout(sfxTimer.current);
+      if (musicTimer.current) clearTimeout(musicTimer.current);
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+      musicStopRef.current?.();
+    },
+    []
+  );
 
   useEffect(() => {
     if (!ready) return;
@@ -332,6 +346,40 @@ export function Studio() {
     setNotice("Restored starter route (Lisbon → Paris → Rome).");
   };
 
+  const resetStyleDefaults = () => {
+    const defaults = defaultStyle();
+    update((current) => ({
+      ...current,
+      style: {
+        ...defaults,
+        music: current.style.music,
+        musicChosen: current.style.musicChosen,
+        soundEffects: current.style.soundEffects,
+      },
+    }));
+    setNotice("Restored default visual & export style.");
+  };
+
+  const resetAudioDefaults = () => {
+    const defaults = defaultStyle();
+    if (sfxTimer.current) clearTimeout(sfxTimer.current);
+    if (musicTimer.current) clearTimeout(musicTimer.current);
+    musicStopRef.current?.();
+    musicStopRef.current = null;
+    setPreviewingSfx(null);
+    setPreviewingMusic(null);
+    update((current) => ({
+      ...current,
+      style: {
+        ...current.style,
+        music: defaults.music,
+        musicChosen: false,
+        soundEffects: defaults.soundEffects,
+      },
+    }));
+    setNotice("Restored default audio settings (Sunny Tropics + transport SFX).");
+  };
+
   const updateStopCoord = async (index: number, coord: { lat: number; lon: number }) => {
     const near = nearestCity(coord.lat, coord.lon, 45);
     update((current) => ({
@@ -547,6 +595,8 @@ export function Studio() {
     }
     const format: ExportFormat = project.style.format ?? "mp4";
     setExporting(true);
+    exportingRef.current = true;
+    lastProgressPctRef.current = 0;
     setProgress(0);
     try {
       const blob = await globe.current?.record(format);
@@ -556,10 +606,12 @@ export function Studio() {
       anchor.href = url;
       anchor.download = `${slugify(project.title)}-${project.style.aspect.replace(":", "x")}.${format}`;
       anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
       setNotice(`${format.toUpperCase()} downloaded.`);
     } catch {
       setNotice("This browser couldn't record the canvas. Try Chrome or Safari, then export again.");
     } finally {
+      exportingRef.current = false;
       setExporting(false);
     }
   };
@@ -945,11 +997,14 @@ export function Studio() {
                 <span className="field-label">Ready-made route templates</span>
                 <select defaultValue="" onChange={(event) => event.target.value && applyTemplate(event.target.value)}>
                   <option value="">Choose a curated route…</option>
-                  {TEMPLATES.map((template) => (
-                    <option key={template.id} value={template.id}>
-                      {template.title} ({template.project.stops.length} stops)
-                    </option>
-                  ))}
+                  {TEMPLATES.map((template) => {
+                    const count = countVisitedPlaces(template.project.stops);
+                    return (
+                      <option key={template.id} value={template.id}>
+                        {template.title} ({count} {count === 1 ? "place" : "places"})
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
 
@@ -1138,6 +1193,22 @@ export function Studio() {
 
           {tab === "options" ? (
             <div className="side-body">
+              <div className="stops-section-header">
+                <div className="stops-title-group">
+                  <h3>Visual &amp; Export Style</h3>
+                </div>
+                <div className="stops-bulk-actions">
+                  <button
+                    type="button"
+                    className="mini-action-btn"
+                    onClick={resetStyleDefaults}
+                    title="Reset all visual and export style settings to default"
+                  >
+                    ↺ Reset to default
+                  </button>
+                </div>
+              </div>
+
               <div className="option-group">
                 <span className="field-label">Map Theme</span>
                 <div className="theme-row">
@@ -1406,11 +1477,36 @@ export function Studio() {
                   ))}
                 </select>
               </label>
+
+              <button
+                type="button"
+                className="btn ghost wide sm"
+                onClick={resetStyleDefaults}
+                title="Reset all visual and export style settings to default"
+              >
+                ↺ Reset style to default
+              </button>
             </div>
           ) : null}
 
           {tab === "music" ? (
             <div className="side-body">
+              <div className="stops-section-header">
+                <div className="stops-title-group">
+                  <h3>Audio &amp; Soundtrack</h3>
+                </div>
+                <div className="stops-bulk-actions">
+                  <button
+                    type="button"
+                    className="mini-action-btn"
+                    onClick={resetAudioDefaults}
+                    title="Reset transport SFX and background soundtrack to default"
+                  >
+                    ↺ Reset to default
+                  </button>
+                </div>
+              </div>
+
               <div className="sfx-toggle-card">
                 <label className="check sfx-toggle-row">
                   <input
@@ -1521,6 +1617,15 @@ export function Studio() {
                   })}
                 </div>
               </div>
+
+              <button
+                type="button"
+                className="btn ghost wide sm"
+                onClick={resetAudioDefaults}
+                title="Reset transport SFX and background soundtrack to default"
+              >
+                ↺ Reset audio to default
+              </button>
             </div>
           ) : null}
 
@@ -1628,7 +1733,15 @@ export function Studio() {
                 pro={limits.pro}
                 play="auto"
                 enableAudio={previewAudio}
-                onTime={(time, total) => setProgress(total ? time / total : 0)}
+                onTime={(time, total) => {
+                  if (!exportingRef.current) return;
+                  const ratio = total ? time / total : 0;
+                  const pct = Math.round(ratio * 100);
+                  if (pct !== lastProgressPctRef.current) {
+                    lastProgressPctRef.current = pct;
+                    setProgress(ratio);
+                  }
+                }}
               />
             </div>
 

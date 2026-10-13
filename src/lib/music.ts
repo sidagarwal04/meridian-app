@@ -1235,6 +1235,10 @@ export async function createAudioSession(options: {
   music: MusicId;
   soundEffects: boolean;
 }): Promise<AudioSession | null> {
+  if (activePreviewStop) {
+    activePreviewStop();
+    activePreviewStop = null;
+  }
   if (options.music === "none" && !options.soundEffects) return null;
   const audio = ctx();
   if (audio.state === "suspended") {

@@ -1,18 +1,23 @@
 # Meridian
 
-Turn a trip into a clear map animation for sharing or presenting.
+Turn any journey into a cinematic 3D globe or 2D map animation ready for sharing or presenting.
 
-Add the places you went, choose how you traveled between them, and export a short video of the route drawn across a globe. Videos stay in this browser. Sign-in uses Google.
+Plot the places you visited, pick how you traveled between each leg, attach polaroid photos, score the trip with procedural soundtracks and vehicle sound effects, and export high-definition video directly from your browser. Everything is stored locally on your device in IndexedDB, with Google sign-in via NextAuth.
 
 ## Features
 
-- Air, road, rail, and sea routes
-- Photos, emoji, and music generated in the browser
-- Import from GPX, KML, GeoJSON, or a Google Maps directions link
-- 1080p WebM export at 60 frames per second
-- English plus Arabic, German, Spanish, French, Hindi, Japanese, Korean, Portuguese, and Chinese
+- **Interactive 2D Route Studio & 3D WebGL Globe** — Plan routes on a fast 2D map editor with country/territory highlighting, drag-and-drop stop ordering, and instant preview on a 3D globe with satellite imagery and topographic relief shading.
+- **5 Cartographic Themes & Custom Palettes** — Switch between `Earth` (3D satellite relief), `Eco`, `Night`, `Paper`, and `Cyber`, or customize ocean/backdrop, route line, and callout label hex colors.
+- **3 Camera Perspectives** — Choose between `2D Overhead`, `3D Tilted` (cinematic pitch), and `3D Chase Cam` (dynamic heading follow) with configurable intro/outro zooms and animation speed (`0.5×` – `2.5×`).
+- **12 Air, Land & Sea Transport Modes** — Combine airplanes, helicopters, high-speed trains, cars, buses, motorcycles, tuk-tuks, camper vans, bicycles, walking, boats, dotted arcs, or clean lines. Driving, cycling, and walking legs automatically trace real road geometry via OSRM with great-circle arc fallback.
+- **Polaroid Photo Showcases** — Attach up to 12 photos per stop (up to 100 photos per expedition) plus custom captions and emojis. Photos fan out as polaroid clusters during camera pauses and remain anchored as mini thumbnails along the route.
+- **Procedural Soundtracks & Per-Leg Transport SFX** — Synthesize 8 beat-driven soundtracks (`Horizon Chill`, `Sunlit Tropics`, `Disco Strut`, `Night Drive 84`, `8-Bit Odyssey`, `Campfire Acoustic`, `Rainy Window Lo-Fi`, `Grand Vista`) and realistic per-leg vehicle audio (jet turbines, helicopter rotors, rail clatter, engines, sails, footsteps, arrival chimes, and polaroid shutter clicks) in real time using the Web Audio API.
+- **Multi-Format Video & GIF Export** — Export in **MP4** (`H.264/AAC`), **MOV** (`QuickTime`), **WebM** (`VP9/Opus`), **MKV** (`Matroska`), or animated **GIF** across **16:9** landscape, **9:16** vertical (Reels / Shorts / TikTok), and **1:1** square at **768p** or **1080p Full HD** and **30 / 60 FPS**.
+- **GPX, KML, GeoJSON, Google Maps & Plain-Text Import** — Drop recorded GPS tracks, paste a Google Maps `/dir/` URL, or describe an itinerary in plain text (e.g., `"Paris to Lyon by train -> Marseille by car"`).
+- **Self-Contained Shareable Route Links** — Share any route via `/r/[code]` URLs that encode stops, transport legs, and styling directly in the link without requiring a backend database.
+- **10 Languages** — Localized UI in English, Spanish, French, German, Portuguese, Japanese, Chinese, Korean, Hindi, and Arabic (with RTL layout support).
 
-## Local setup
+## Local Setup
 
 Requires Node.js 20 or newer.
 
@@ -21,16 +26,18 @@ npm install
 cp .env.example .env.local
 ```
 
-Set these in `.env.local`:
+Configure `.env.local`:
 
-```
+```ini
 NEXTAUTH_URL=http://localhost:3456
 NEXTAUTH_SECRET=
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 ```
 
-`NEXTAUTH_SECRET` can be any long random string. In Google Cloud Console, create an OAuth client of type Web application and set the authorized redirect URI to `http://localhost:3456/api/auth/callback/google`.
+`NEXTAUTH_SECRET` can be any long random string (e.g., `openssl rand -base64 32`). In the [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth 2.0 Client ID of type **Web application** and add `http://localhost:3456/api/auth/callback/google` to **Authorized redirect URIs**.
+
+Start the development server:
 
 ```bash
 npm run dev
@@ -40,13 +47,13 @@ Open [http://localhost:3456](http://localhost:3456).
 
 ## Scripts
 
-- `npm run dev` starts the development server on port 3456
-- `npm run build` creates a production build
-- `npm start` serves that build
+- `npm run dev` — Start the development server on port `3456`
+- `npm run build` — Build the production Next.js application
+- `npm start` — Start the production server on port `3456`
 
-## Data
+## Data & Attribution
 
-Country shapes come from Natural Earth via world-atlas. Place search uses OpenStreetMap Nominatim. Road geometry uses OSRM. Follow each service's usage policy.
+Country boundaries and land topology come from [Natural Earth](https://www.naturalearthdata.com/) via `world-atlas`. Satellite relief textures use NASA Blue Marble & ETOPO1 elevation data. Place search and reverse geocoding use [OpenStreetMap Nominatim](https://nominatim.org/) alongside a built-in instant gazetteer. Road, bike, and walking geometry uses [OSRM](https://project-osrm.org/). Please follow each service's usage policy.
 
 ## License
 
