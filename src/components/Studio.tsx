@@ -11,6 +11,7 @@ import { TRACKS, playMusicPreview, playTransportPreview, unlockAudio } from "@/l
 import { getProject, saveProject } from "@/lib/storage";
 import { TEMPLATES } from "@/lib/templates";
 import {
+  EXPORT_FORMATS,
   THEMES,
   TRANSPORTS,
   applyTheme,
@@ -21,6 +22,7 @@ import {
   starterStops,
   transportMeta,
   uid,
+  type ExportFormat,
   type Leg,
   type Project,
   type Stop,
@@ -526,17 +528,18 @@ export function Studio() {
       setNotice("Add at least two places.");
       return;
     }
+    const format: ExportFormat = project.style.format ?? "mp4";
     setExporting(true);
     setProgress(0);
     try {
-      const blob = await globe.current?.record();
+      const blob = await globe.current?.record(format);
       if (!blob) throw new Error("empty");
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `${slugify(project.title)}.webm`;
+      anchor.download = `${slugify(project.title)}-${project.style.aspect.replace(":", "x")}.${format}`;
       anchor.click();
-      setNotice("Video downloaded.");
+      setNotice(`${format.toUpperCase()} downloaded.`);
     } catch {
       setNotice("This browser couldn't record the canvas. Try Chrome or Safari, then export again.");
     } finally {
@@ -574,7 +577,7 @@ export function Studio() {
             className={stageMode === "map" ? "active" : ""}
             onClick={() => setStageMode("map")}
           >
-            🗺 Map Editor
+            🗺 Route Studio
           </button>
           <button
             type="button"
@@ -1305,19 +1308,36 @@ export function Studio() {
 
               <div className="side-divider" />
 
-              <label className="field">
-                <span className="field-label">Video aspect ratio</span>
-                <select
-                  value={project.style.aspect}
-                  onChange={(event) =>
-                    update((current) => ({ ...current, style: { ...current.style, aspect: event.target.value as Project["style"]["aspect"] } }))
-                  }
-                >
-                  <option value="16:9">16:9 Landscape (YouTube, Slides)</option>
-                  <option value="9:16">9:16 Vertical (Reels, Shorts, TikTok)</option>
-                  <option value="1:1">1:1 Square (Instagram, Feed)</option>
-                </select>
-              </label>
+              <div className="field">
+                <span className="field-label">Video layout (aspect ratio)</span>
+                <div className="aspect-ratio-picker" role="radiogroup" aria-label="Video aspect ratio">
+                  {(
+                    [
+                      { id: "16:9", label: "16:9", sub: "Landscape" },
+                      { id: "9:16", label: "9:16", sub: "Vertical" },
+                      { id: "1:1", label: "1:1", sub: "Square" },
+                    ] as const
+                  ).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={project.style.aspect === item.id}
+                      className={`aspect-option-btn${project.style.aspect === item.id ? " active" : ""}`}
+                      onClick={() =>
+                        update((current) => ({
+                          ...current,
+                          style: { ...current.style, aspect: item.id },
+                        }))
+                      }
+                    >
+                      <span className={`aspect-frame-icon aspect-${item.id.replace(":", "-")}`} />
+                      <strong>{item.label}</strong>
+                      <small>{item.sub}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div className="two-col-fields">
                 <label className="field">
@@ -1350,6 +1370,25 @@ export function Studio() {
                   </select>
                 </label>
               </div>
+
+              <label className="field">
+                <span className="field-label">Export file format</span>
+                <select
+                  value={project.style.format ?? "mp4"}
+                  onChange={(event) =>
+                    update((current) => ({
+                      ...current,
+                      style: { ...current.style, format: event.target.value as ExportFormat },
+                    }))
+                  }
+                >
+                  {EXPORT_FORMATS.map((fmt) => (
+                    <option key={fmt.id} value={fmt.id}>
+                      {fmt.label} (.{fmt.ext}) — {fmt.sub}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           ) : null}
 
@@ -1490,9 +1529,27 @@ export function Studio() {
               onClearAll={clearAllStops}
             />
           ) : (
-            <div className="studio-globe-stage">
+            <div className={`studio-globe-stage aspect-${project.style.aspect.replace(":", "-")}`}>
               <GlobeStage ref={inlineGlobe} project={project} pro={limits.pro} play="loop" enableAudio={stageAudio} />
               <div className="globe-stage-controls">
+                <div className="stage-aspect-pills" role="group" aria-label="Layout aspect ratio">
+                  {(["16:9", "9:16", "1:1"] as const).map((ratio) => (
+                    <button
+                      key={ratio}
+                      type="button"
+                      className={`stage-aspect-pill${project.style.aspect === ratio ? " active" : ""}`}
+                      onClick={() =>
+                        update((current) => ({
+                          ...current,
+                          style: { ...current.style, aspect: ratio },
+                        }))
+                      }
+                      title={`Switch layout to ${ratio}`}
+                    >
+                      {ratio}
+                    </button>
+                  ))}
+                </div>
                 <button type="button" className="map-ctrl-btn text" onClick={() => inlineGlobe.current?.play()}>
                   ↻ Replay animation
                 </button>
@@ -1505,7 +1562,7 @@ export function Studio() {
                   {stageAudio ? "🔊 Sound On" : "🔇 Muted"}
                 </button>
                 <button type="button" className="map-ctrl-btn text" onClick={() => setStageMode("map")}>
-                  ✎ Back to Map Editor
+                  ✎ Back to Route Studio
                 </button>
               </div>
             </div>
@@ -1514,18 +1571,19 @@ export function Studio() {
       </div>
 
       {preview ? (
-        <div className="modal" role="dialog" aria-modal="true" aria-label="Preview">
-          <div className="modal-card">
+        <div className="modal" role="dialog" aria-modal="true" aria-label="Export Video">
+          <div className="modal-card export-modal-card">
             <header className="modal-header">
               <div>
-                <strong>{project.title}</strong>
+                <strong>Export Video · {project.title}</strong>
                 <span className="modal-sub">
-                  {visitedPlacesCount} {visitedPlacesCount === 1 ? "place" : "places"} · {project.style.aspect} · {project.style.resolution}p @ {project.style.fps}fps
+                  {visitedPlacesCount} {visitedPlacesCount === 1 ? "place" : "places"} · {project.style.aspect} · {(project.style.format ?? "mp4").toUpperCase()} · {project.style.resolution}p @ {project.style.fps}fps
                 </span>
               </div>
               <button
                 className="icon-btn bare"
-                aria-label="Close preview"
+                aria-label="Close export modal"
+                disabled={exporting}
                 onClick={() => {
                   globe.current?.pause();
                   setPreview(false);
@@ -1534,14 +1592,75 @@ export function Studio() {
                 ×
               </button>
             </header>
-            <GlobeStage
-              ref={globe}
-              project={project}
-              pro={limits.pro}
-              play="auto"
-              enableAudio={previewAudio}
-              onTime={(time, total) => setProgress(total ? time / total : 0)}
-            />
+
+            <div className={`export-stage-viewport aspect-${project.style.aspect.replace(":", "-")}`}>
+              <GlobeStage
+                ref={globe}
+                project={project}
+                pro={limits.pro}
+                play="auto"
+                enableAudio={previewAudio}
+                onTime={(time, total) => setProgress(total ? time / total : 0)}
+              />
+            </div>
+
+            <div className="export-controls-row">
+              <div className="export-inline-group" role="radiogroup" aria-label="Export layout aspect ratio">
+                <span className="export-layout-label">Layout</span>
+                <div className="export-layout-options">
+                  {(
+                    [
+                      { id: "16:9", title: "16:9", desc: "Landscape" },
+                      { id: "9:16", title: "9:16", desc: "Vertical" },
+                      { id: "1:1", title: "1:1", desc: "Square" },
+                    ] as const
+                  ).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={project.style.aspect === item.id}
+                      disabled={exporting}
+                      className={`export-layout-btn${project.style.aspect === item.id ? " active" : ""}`}
+                      onClick={() =>
+                        update((current) => ({
+                          ...current,
+                          style: { ...current.style, aspect: item.id },
+                        }))
+                      }
+                    >
+                      <span className={`aspect-frame-icon aspect-${item.id.replace(":", "-")}`} />
+                      <span className="export-layout-copy">
+                        <strong>{item.title}</strong>
+                        <small>{item.desc}</small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="export-inline-group export-format-group">
+                <span className="export-layout-label">Format</span>
+                <select
+                  className="export-format-select"
+                  value={project.style.format ?? "mp4"}
+                  disabled={exporting}
+                  onChange={(event) =>
+                    update((current) => ({
+                      ...current,
+                      style: { ...current.style, format: event.target.value as ExportFormat },
+                    }))
+                  }
+                >
+                  {EXPORT_FORMATS.map((fmt) => (
+                    <option key={fmt.id} value={fmt.id}>
+                      {fmt.label} (.{fmt.ext}) — {fmt.sub}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
             <div className="modal-actions">
               <button
                 className="btn ghost"
@@ -1568,10 +1687,14 @@ export function Studio() {
                 {copied ? "✓ Copied to clipboard" : "🔗 Copy share link"}
               </button>
               <button className="btn primary" onClick={renderVideo} disabled={exporting}>
-                {exporting ? `Rendering ${Math.round(progress * 100)}%…` : "⬇ Download WebM video"}
+                {exporting
+                  ? `Rendering ${Math.round(progress * 100)}%…`
+                  : `⬇ Download ${(project.style.format ?? "mp4").toUpperCase()} (.${project.style.format ?? "mp4"} · ${project.style.aspect})`}
               </button>
             </div>
-            <p className="hint">Records a high-definition WebM video of this 3D globe animation directly in your browser.</p>
+            <p className="hint">
+              Records a high-definition {project.style.aspect} {(project.style.format ?? "mp4").toUpperCase()} (.{project.style.format ?? "mp4"}) file of this 3D globe animation directly in your browser.
+            </p>
           </div>
         </div>
       ) : null}

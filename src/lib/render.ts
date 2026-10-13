@@ -423,8 +423,8 @@ export function drawSatelliteBiomeShading(
   globeRadius: number,
   theme: ThemeId
 ) {
-  if (theme === "paper" || theme === "night") return;
-  const intensity = theme === "satellite" || theme === "earth" ? 1 : 0.55;
+  if (theme === "paper" || theme === "night" || theme === "cyber") return;
+  const intensity = theme === "earth" ? 1 : 0.55;
   ctx.save();
   ctx.globalAlpha = intensity;
   for (const [lon, lat, degRadius, innerColor, outerColor] of BIOME_PATCHES) {
@@ -567,7 +567,7 @@ export function drawFrame(
   const bg = project.style.background || palette.bg;
   const line = project.style.lineColor || palette.line;
   const label = project.style.labelColor || palette.labelColor;
-  const isSatelliteLook = project.style.theme === "earth" || project.style.theme === "satellite";
+  const isSatelliteLook = project.style.theme === "earth";
 
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = bg;

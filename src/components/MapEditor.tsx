@@ -373,7 +373,7 @@ export function MapEditor({
       projectionRef.current = projection;
       const path = geoPath(projection, ctx);
       const visitedCodes = new Set(validStops.map((s) => s.code).filter(Boolean));
-      const isSatelliteLook = theme === "earth" || theme === "satellite";
+      const isSatelliteLook = theme === "earth";
 
       if (!shaderRendered) {
         // Fallback 2D canvas fill while WebGL texture loads

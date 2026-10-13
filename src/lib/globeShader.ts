@@ -18,7 +18,7 @@ uniform vec2 u_res;
 uniform vec2 u_center;
 uniform float u_scale;
 uniform vec3 u_rot;       // [rLonRad, rLatRad, rGammaRad]
-uniform int u_theme;      // 0=earth, 1=satellite, 2=eco, 3=night, 4=paper
+uniform int u_theme;      // 0=earth, 1=cyber, 2=eco, 3=night, 4=paper
 uniform int u_projMode;   // 0=orthographic 3D globe, 1=naturalEarth1 2D map
 uniform float u_time;
 uniform float u_hasTex;
@@ -129,7 +129,9 @@ void main() {
       }
       float halo = clamp(1.0 - (globeR - 1.0) / 0.13, 0.0, 1.0);
       float haloPow = pow(halo, 2.8);
-      vec3 atmoCol = u_theme == 2
+      vec3 atmoCol = u_theme == 1
+        ? mix(vec3(0.08, 0.90, 1.00), vec3(0.95, 0.16, 0.85), clamp(rel.x * 0.5 + 0.5, 0.0, 1.0))
+        : u_theme == 2
         ? vec3(0.20, 0.85, 0.68)
         : u_theme == 3
         ? vec3(0.28, 0.52, 0.98)
@@ -230,11 +232,11 @@ void main() {
   vec3 shelfCol     = vec3(0.095, 0.365, 0.560);
   vec3 shimmerCol   = vec3(0.240, 0.590, 0.780);
 
-  if (u_theme == 1) { // Satellite (deeper contrast, vivid reef turquoise)
-    deepOceanCol = vec3(0.018, 0.062, 0.155);
-    midOceanCol  = vec3(0.038, 0.140, 0.305);
-    shelfCol     = vec3(0.085, 0.395, 0.600);
-    shimmerCol   = vec3(0.280, 0.650, 0.840);
+  if (u_theme == 1) { // Cyber (abyssal obsidian ocean with neon cyan shelf)
+    deepOceanCol = vec3(0.012, 0.020, 0.068);
+    midOceanCol  = vec3(0.022, 0.052, 0.145);
+    shelfCol     = vec3(0.045, 0.240, 0.420);
+    shimmerCol   = vec3(0.080, 0.880, 1.000);
   } else if (u_theme == 2) { // Eco (emerald/aquamarine ocean)
     deepOceanCol = vec3(0.025, 0.145, 0.175);
     midOceanCol  = vec3(0.045, 0.245, 0.275);
@@ -304,11 +306,15 @@ void main() {
   vec3 alpineRock   = vec3(0.410, 0.395, 0.380);
   vec3 snowPeak     = vec3(0.945, 0.968, 0.992);
 
-  if (u_theme == 1) { // Satellite (rich orbital contrast)
-    lushForest = vec3(0.095, 0.255, 0.125);
-    tempForest = vec3(0.165, 0.340, 0.165);
-    farmland   = vec3(0.265, 0.420, 0.210);
-    desertSand = vec3(0.765, 0.605, 0.415);
+  if (u_theme == 1) { // Cyber (dark holographic synth-slate & neon relief)
+    lushForest = vec3(0.045, 0.085, 0.195);
+    tempForest = vec3(0.058, 0.110, 0.235);
+    farmland   = vec3(0.072, 0.138, 0.275);
+    drySteppe  = vec3(0.095, 0.115, 0.255);
+    desertSand = vec3(0.130, 0.105, 0.275);
+    desertRock = vec3(0.105, 0.085, 0.225);
+    alpineRock = vec3(0.140, 0.240, 0.420);
+    snowPeak   = vec3(0.280, 0.920, 1.000);
   } else if (u_theme == 2) { // Eco
     lushForest = vec3(0.065, 0.295, 0.185);
     tempForest = vec3(0.115, 0.395, 0.245);
@@ -374,8 +380,35 @@ void main() {
     landColor += vec3(1.00, 0.74, 0.32) * cityGlow * 1.45;
   }
 
+  // Cyber theme: holographic grid, neon cyan coastline rim, topographic contours & magenta/cyan synth nodes
+  if (u_theme == 1) {
+    float gridLon = smoothstep(0.955, 0.995, cos(lon * 24.0));
+    float gridLat = smoothstep(0.955, 0.995, cos(lat * 24.0));
+    float holoGrid = max(gridLon, gridLat);
+    oceanColor += vec3(0.04, 0.55, 0.78) * holoGrid * 0.22;
+    landColor += vec3(0.08, 0.78, 0.96) * holoGrid * 0.18;
+
+    // Glowing topographic elevation contour rings on land
+    float topoContour = smoothstep(0.06, 0.0, abs(fract(hCenter * 9.0) - 0.5));
+    landColor += vec3(0.10, 0.88, 1.00) * topoContour * (0.18 + 0.35 * clamp(hCenter, 0.0, 1.0));
+
+    // Synthwave magenta & electric cyan urban hub clusters
+    float coastalPop = exp(-inland * 3.5);
+    float latPop = exp(-pow((absLat - 0.34) / 0.28, 2.0));
+    float hubNoise = pow(clamp(fbm3(P * 75.0) * 1.25, 0.0, 1.0), 3.1);
+    float hubGlow = hubNoise * (0.35 + 0.65 * coastalPop) * latPop * smoothstep(0.16, 0.48, moisture);
+    vec3 neonHubCol = mix(vec3(1.00, 0.16, 0.82), vec3(0.12, 0.94, 1.00), step(0.5, detailB));
+    landColor += neonHubCol * hubGlow * 1.55;
+  }
+
   // Crisp coastal beach/littoral transition between shallow shelf and land
   vec3 finalColor = mix(oceanColor, landColor, landMask);
+
+  // Cyber neon cyan shoreline laser edge
+  if (u_theme == 1) {
+    float coastEdge = exp(-abs(signedCoast) * 155.0);
+    finalColor += vec3(0.12, 0.94, 1.00) * coastEdge * 0.78;
+  }
 
   // ========================================================
   // 3. 3D HORIZON ATMOSPHERIC HAZE & LIMB FRESNEL SCATTERING
@@ -385,7 +418,9 @@ void main() {
     float haze = pow(clamp(limb, 0.0, 1.0), 2.35);
     float rimLine = smoothstep(0.88, 0.998, globeR);
 
-    vec3 hazeCol = u_theme == 2
+    vec3 hazeCol = u_theme == 1
+      ? mix(vec3(0.10, 0.90, 1.00), vec3(0.92, 0.18, 0.84), 0.32)
+      : u_theme == 2
       ? vec3(0.22, 0.78, 0.65)
       : u_theme == 3
       ? vec3(0.20, 0.44, 0.88)
@@ -422,7 +457,7 @@ function themeToIndex(theme: ThemeId): number {
   switch (theme) {
     case "earth":
       return 0;
-    case "satellite":
+    case "cyber":
       return 1;
     case "eco":
       return 2;

@@ -139,10 +139,10 @@ export default function Page() {
         ) : (
           <div className="empty-library-card">
             <span className="feature-icon" style={{ margin: "0 auto" }}>🌍</span>
-            <h2>No travel videos yet</h2>
+            <h2>No expeditions yet</h2>
             <p>Start with a blank globe or pick one of the curated templates below to launch the Studio.</p>
             <button className="btn primary lg" onClick={create} disabled={busy || !user}>
-              ✦ Create your first map video
+              ✦ Create your first expedition
             </button>
           </div>
         )}

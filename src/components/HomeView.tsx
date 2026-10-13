@@ -80,7 +80,7 @@ export function HomeView() {
           <div className="hero-metrics">
             <div className="metric-card">
               <strong>1080p @ 60fps</strong>
-              <span>Instant WebM export</span>
+              <span>MP4, MOV, WebM &amp; GIF</span>
             </div>
             <div className="metric-card">
               <strong>12+ Transports</strong>
@@ -221,8 +221,8 @@ export function HomeView() {
             </p>
             <div className="feature-mini-chips">
               <span>📺 16:9 · 9:16 · 1:1</span>
-              <span>🎵 4 Soundtracks</span>
-              <span>⬇ Free WebM</span>
+              <span>🎵 9 Soundtracks</span>
+              <span>⬇ MP4 · MOV · WebM · GIF</span>
             </div>
           </div>
         </div>

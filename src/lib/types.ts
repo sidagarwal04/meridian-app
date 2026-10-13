@@ -13,9 +13,10 @@ export type Transport =
   | "tuktuk"
   | "camper";
 
-export type ThemeId = "earth" | "eco" | "night" | "paper" | "satellite";
+export type ThemeId = "earth" | "eco" | "night" | "paper" | "cyber";
 export type CameraView = "horizon" | "orbit" | "top";
 export type Aspect = "16:9" | "9:16" | "1:1";
+export type ExportFormat = "mp4" | "mov" | "webm" | "mkv" | "gif";
 export type LabelMode = "current" | "visited" | "always";
 export type Units = "km" | "mi" | "none";
 export type MusicId =
@@ -63,9 +64,24 @@ export type Style = {
   musicChosen?: boolean;
   soundEffects: boolean;
   aspect: Aspect;
+  format?: ExportFormat;
   fps: 30 | 60;
   resolution: "768" | "1080";
 };
+
+export const EXPORT_FORMATS: {
+  id: ExportFormat;
+  ext: string;
+  label: string;
+  sub: string;
+  mime: string;
+}[] = [
+  { id: "mp4", ext: "mp4", label: "MP4", sub: "Universal H.264 · Social & Web", mime: "video/mp4" },
+  { id: "mov", ext: "mov", label: "MOV", sub: "QuickTime · Apple & Final Cut", mime: "video/quicktime" },
+  { id: "webm", ext: "webm", label: "WebM", sub: "VP9 · High Efficiency Web", mime: "video/webm" },
+  { id: "mkv", ext: "mkv", label: "MKV", sub: "Matroska · Desktop HD", mime: "video/x-matroska" },
+  { id: "gif", ext: "gif", label: "GIF", sub: "Animated Loop · Docs & Chat", mime: "image/gif" },
+];
 
 export type Project = {
   id: string;
@@ -183,15 +199,15 @@ export const THEMES: Record<
     labelColor: "#0f172a",
     stars: false,
   },
-  satellite: {
-    label: "Satellite",
-    bg: "#08090d",
-    ocean: "#071a33",
-    land: "#2d5232",
-    landHi: "rgba(56, 189, 248, 0.18)",
-    border: "rgba(255, 255, 255, 0.32)",
-    line: "#00a3ff",
-    labelColor: "#ffffff",
+  cyber: {
+    label: "Cyber",
+    bg: "#04020b",
+    ocean: "#060b1d",
+    land: "#0f1730",
+    landHi: "rgba(34, 211, 238, 0.24)",
+    border: "rgba(34, 211, 238, 0.42)",
+    line: "#ff2bd6",
+    labelColor: "#f0fdff",
     stars: true,
   },
 };
@@ -228,6 +244,7 @@ export function defaultStyle(): Style {
     music: "ambient",
     soundEffects: true,
     aspect: "16:9",
+    format: "mp4",
     fps: 30,
     resolution: "768",
   };
@@ -306,10 +323,10 @@ export function frameSize(style: Style, pro: boolean) {
 }
 
 export function applyTheme(style: Style, theme: ThemeId): Style {
-  const palette = THEMES[theme];
+  const palette = THEMES[theme] ?? THEMES.earth;
   return {
     ...style,
-    theme,
+    theme: THEMES[theme] ? theme : "earth",
     background: palette.bg,
     lineColor: palette.line,
     labelColor: palette.labelColor,
@@ -317,9 +334,10 @@ export function applyTheme(style: Style, theme: ThemeId): Style {
 }
 
 export function presentStyle(style: Style, pro: boolean): Style {
-  const palette = THEMES[style.theme];
+  const palette = THEMES[style.theme] ?? THEMES.earth;
   return {
     ...style,
+    theme: THEMES[style.theme] ? style.theme : "earth",
     background: pro ? style.background : palette.bg,
     lineColor: pro ? style.lineColor : palette.line,
     labelColor: pro ? style.labelColor : palette.labelColor,

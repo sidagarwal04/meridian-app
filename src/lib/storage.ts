@@ -1,4 +1,18 @@
-import { createProject, type Account, type Project, type User } from "./types";
+import { THEMES, createProject, type Account, type Project, type ThemeId, type User } from "./types";
+
+function normalizeProject(project: Project): Project {
+  const rawTheme = project?.style?.theme as string | undefined;
+  if (rawTheme && !(rawTheme in THEMES)) {
+    return {
+      ...project,
+      style: {
+        ...project.style,
+        theme: "earth" as ThemeId,
+      },
+    };
+  }
+  return project;
+}
 
 const SESSION = "meridian-session";
 const ACCOUNTS = "meridian-accounts";
@@ -74,7 +88,9 @@ export async function listProjects(): Promise<Project[]> {
     const tx = db.transaction("projects", "readonly");
     const req = tx.objectStore("projects").getAll();
     req.onsuccess = () => {
-      const rows = (req.result as Project[]).sort((a, b) => b.updatedAt - a.updatedAt);
+      const rows = (req.result as Project[])
+        .map(normalizeProject)
+        .sort((a, b) => b.updatedAt - a.updatedAt);
       resolve(rows);
     };
     req.onerror = () => reject(req.error);
@@ -85,7 +101,10 @@ export async function getProject(id: string): Promise<Project | null> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const req = db.transaction("projects", "readonly").objectStore("projects").get(id);
-    req.onsuccess = () => resolve((req.result as Project) ?? null);
+    req.onsuccess = () => {
+      const found = req.result as Project | undefined;
+      resolve(found ? normalizeProject(found) : null);
+    };
     req.onerror = () => reject(req.error);
   });
 }

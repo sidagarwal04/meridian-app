@@ -63,7 +63,7 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
       {open ? (
         <div className="menu-panel">
           <Link href={createHref} onClick={() => setOpen(false)}>
-            🎬 {t("myVideos")}
+            🧭 {t("myVideos")}
           </Link>
           <Link href="/examples" onClick={() => setOpen(false)}>
             🌍 {t("viewExamples")}

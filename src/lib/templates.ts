@@ -25,7 +25,7 @@ export const TEMPLATES: { id: string; title: string; blurb: string; project: Pro
       { name: "Bengaluru", country: "India", code: "IN", lat: 12.9716, lon: 77.5946 },
       { name: "Berlin", country: "Germany", code: "DE", lat: 52.52, lon: 13.405, transport: "plane" },
       { name: "Denmark", country: "Denmark", code: "DK", lat: 56.2639, lon: 9.5018, transport: "plane" },
-    ], "satellite"),
+    ], "earth"),
   },
   {
     id: "europe",
@@ -63,7 +63,7 @@ export const TEMPLATES: { id: string; title: string; blurb: string; project: Pro
       { name: "Portland", country: "United States", code: "US", lat: 45.5152, lon: -122.6784, transport: "car" },
       { name: "Seattle", country: "United States", code: "US", lat: 47.6062, lon: -122.3321, transport: "car" },
       { name: "Vancouver", country: "Canada", code: "CA", lat: 49.2827, lon: -123.1207, transport: "car" },
-    ], "satellite"),
+    ], "cyber"),
   },
   {
     id: "sea",
