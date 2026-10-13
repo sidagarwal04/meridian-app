@@ -19,7 +19,7 @@ const FAQ = [
   ],
   [
     "Where are my videos and photos stored?",
-    "Everything is stored locally in your browser's IndexedDB on this device. Nothing is uploaded to an external server. A copied share link encodes the route coordinates directly in the URL.",
+    "Your routes, stops, transport modes, and style settings sync across your devices via your Google account so you can switch between laptop and mobile. Personal photos attached to stops are never uploaded to our servers — they stay locally in the browser (IndexedDB) on the device where you added them.",
   ],
   [
     "Is Meridian really 100% free?",

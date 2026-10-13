@@ -7,8 +7,8 @@ export const metadata: Metadata = { title: "Privacy Policy" };
 const HIGHLIGHTS = [
   {
     icon: "🔒",
-    title: "Stored on Your Device",
-    desc: "Projects, routes, and stop photos live in your browser's IndexedDB — never uploaded to a central Meridian cloud server.",
+    title: "Cross-Device Routes, Local-Only Photos",
+    desc: "Your routes and style settings sync across devices with your account, while personal stop photos stay strictly in your local browser's IndexedDB — never uploaded to our servers.",
   },
   {
     icon: "🔑",
@@ -30,8 +30,8 @@ const SECTIONS = [
   },
   {
     num: "02",
-    title: "Local Project & Photo Storage",
-    body: "Your video projects, itineraries, and attached stop photos live locally inside your browser using IndexedDB. Videos are rendered directly on your device via HTML5 Canvas and Web Audio — your media files are not uploaded to a Meridian server.",
+    title: "Cross-Device Route Sync & Local Photo Privacy",
+    body: "Your route itineraries, stops, and style settings are synced to your Google account (via Netlify Blobs) so you can access your library across laptop and mobile devices. Attached stop photos are stripped before syncing and remain strictly inside your local browser's IndexedDB on the device where they were added. Videos are rendered directly on your device via HTML5 Canvas and Web Audio.",
   },
   {
     num: "03",

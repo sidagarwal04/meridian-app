@@ -26,7 +26,13 @@ function userFromSession(session: { user?: { email?: string | null; name?: strin
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
-  const user = useMemo(() => (status === "authenticated" ? userFromSession(session) : null), [session, status]);
+  const user = useMemo(() => {
+    const resolved = status === "authenticated" ? userFromSession(session) : null;
+    if (resolved && typeof window !== "undefined") {
+      persistSession(resolved, accountFor(resolved.email) ?? defaultAccount());
+    }
+    return resolved;
+  }, [session, status]);
 
   useEffect(() => {
     if (!user) return;

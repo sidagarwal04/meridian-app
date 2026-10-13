@@ -91,6 +91,7 @@ export type Project = {
   stops: Stop[];
   legs: Leg[];
   style: Style;
+  ownerEmail?: string;
 };
 
 export type User = {

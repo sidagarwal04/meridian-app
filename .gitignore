@@ -8,3 +8,6 @@ out
 .env*.local
 tsconfig.tsbuildinfo
 .vercel
+.netlify
+.data
+

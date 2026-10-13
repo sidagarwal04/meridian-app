@@ -66,7 +66,9 @@ export default function Page() {
             </span>
             <h1 style={{ textAlign: "left", margin: "10px 0 6px" }}>{t("myVideos")}</h1>
             <p className="library-sub">
-              {user ? `Signed in as ${user.email} · All projects are saved locally in your browser.` : ""}
+              {user
+                ? `Signed in as ${user.email} · Routes & settings sync across your devices. Personal stop photos stay local to the device where they were added.`
+                : ""}
             </p>
           </div>
           <button className="btn primary lg" onClick={create} disabled={busy || !user}>

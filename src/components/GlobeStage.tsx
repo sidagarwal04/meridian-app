@@ -13,7 +13,7 @@ export type GlobeHandle = {
   record: (format?: ExportFormat) => Promise<Blob>;
 };
 
-type PlayMode = "auto" | "loop" | "manual" | "freeze-end";
+type PlayMode = "auto" | "loop" | "manual" | "freeze-end" | "idle";
 
 type Props = {
   project: Project;

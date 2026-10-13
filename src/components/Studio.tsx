@@ -1074,6 +1074,9 @@ export function Studio() {
               <p className="hint">
                 {photoCount}/{limits.maxPhotos} photos added. Photos appear as floating polaroids when the camera pauses on a stop.
               </p>
+              <p className="hint" style={{ marginTop: -4, opacity: 0.85 }}>
+                🔒 <strong>Device-only photos:</strong> Your route and style settings sync across devices with your account, but attached photos are never uploaded to our servers and remain only on this browser/device.
+              </p>
               {project.stops.map((stop, index) => (
                 <div key={stop.id} className="photo-stop">
                   <div className="photo-stop-header">
