@@ -7,16 +7,19 @@ import { searchCities } from "@/lib/cities";
 import { flagEmoji, haversineKm, nearestCity } from "@/lib/geo";
 import { parseGeoJson, parseGpx, parseItinerary, parseKml, placesFromGoogleUrl, simplifyTrack } from "@/lib/parse";
 import { encodeRoute } from "@/lib/share";
+import { playTransportPreview } from "@/lib/music";
 import { getProject, saveProject } from "@/lib/storage";
 import { TEMPLATES } from "@/lib/templates";
 import {
   THEMES,
   TRANSPORTS,
   applyTheme,
+  defaultStyle,
   legAllowed,
   limitsFor,
   makeStop,
   starterStops,
+  transportMeta,
   uid,
   type Leg,
   type Project,
@@ -57,6 +60,11 @@ function sanitizeProject(project: Project): Project {
     ...project,
     stops,
     legs,
+    style: {
+      ...defaultStyle(),
+      ...project.style,
+      soundEffects: project.style?.soundEffects ?? true,
+    },
   };
 }
 
@@ -80,6 +88,9 @@ export function Studio() {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [showImports, setShowImports] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [previewingSfx, setPreviewingSfx] = useState<Transport | null>(null);
+  const [stageAudio, setStageAudio] = useState(true);
+  const sfxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const globe = useRef<GlobeHandle>(null);
   const inlineGlobe = useRef<GlobeHandle>(null);
@@ -301,6 +312,15 @@ export function Studio() {
     }));
   };
 
+  const auditionTransport = (transport: Transport, durationSec = 1.6) => {
+    setPreviewingSfx(transport);
+    if (sfxTimer.current) clearTimeout(sfxTimer.current);
+    playTransportPreview(transport, durationSec);
+    sfxTimer.current = setTimeout(() => {
+      setPreviewingSfx((curr) => (curr === transport ? null : curr));
+    }, durationSec * 1000);
+  };
+
   const setTransport = (index: number, transport: Transport) => {
     if (!legAllowed(transport, limits.pro)) {
       setLock("Land and sea icons are part of Pro. Airplane, line, and dots stay on the free plan.");
@@ -310,6 +330,9 @@ export function Studio() {
       ...current,
       legs: current.legs.map((leg, legIndex) => (legIndex === index ? { transport } : leg)),
     }));
+    if (project.style.soundEffects ?? true) {
+      auditionTransport(transport, 1.35);
+    }
   };
 
   const applyTemplate = (id: string) => {
@@ -766,6 +789,15 @@ export function Studio() {
                               ))}
                             </select>
                           </label>
+                          <button
+                            type="button"
+                            className={`leg-sfx-btn ${previewingSfx === project.legs[index].transport ? "playing" : ""}`}
+                            title={`Preview ${transportMeta(project.legs[index].transport).soundLabel}`}
+                            aria-label={`Preview ${transportMeta(project.legs[index].transport).label} sound`}
+                            onClick={() => auditionTransport(project.legs[index].transport, 1.5)}
+                          >
+                            🔊
+                          </button>
                           {project.stops[index + 1] ? (
                             <span className="leg-distance">
                               {Math.round(haversineKm(stop, project.stops[index + 1])).toLocaleString()} km
@@ -1202,34 +1234,93 @@ export function Studio() {
 
           {tab === "music" ? (
             <div className="side-body">
-              <p className="hint">
-                Synthesized ambient soundtracks are generated right in your browser and mixed into the video export.
-              </p>
-              {!limits.music ? <p className="notice">Music is a Pro feature. Free exports stay silent.</p> : null}
-              <div className="music-list">
-                {[
-                  ["none", "🔇 No audio", "Silent video export"],
-                  ["ambient", "🌌 Ambient Drift", "Warm atmospheric pads"],
-                  ["synthwave", "🌆 Synthwave Pulse", "Retro driving arpeggio"],
-                  ["cinematic", "🎻 Cinematic Horizon", "Deep orchestral swells"],
-                  ["folk", "🪕 Acoustic Trail", "Light plucked melody"],
-                ].map(([id, label, desc]) => (
-                  <label key={id} className={`music-card ${project.style.music === id ? "on" : ""}`}>
-                    <input
-                      type="radio"
-                      name="music"
-                      checked={project.style.music === id}
-                      onChange={() => {
-                        if (id !== "none" && !limits.music) return setLock("Music is included with Pro.");
-                        update((current) => ({ ...current, style: { ...current.style, music: id as Project["style"]["music"] } }));
-                      }}
-                    />
-                    <div>
-                      <strong>{label}</strong>
-                      <small>{desc}</small>
-                    </div>
-                  </label>
-                ))}
+              <div className="sfx-toggle-card">
+                <label className="check sfx-toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={project.style.soundEffects ?? true}
+                    onChange={(event) =>
+                      update((current) => ({
+                        ...current,
+                        style: { ...current.style, soundEffects: event.target.checked },
+                      }))
+                    }
+                  />
+                  <div>
+                    <strong>🔊 Transport Sound Effects (SFX)</strong>
+                    <small>
+                      Play stock sounds for each leg’s mode of transport (jet whoosh, rail clackety-clack, ocean waves, bicycle bell, etc.) during preview and video export.
+                    </small>
+                  </div>
+                </label>
+              </div>
+
+              <div className="option-group">
+                <div className="sfx-header-row">
+                  <span className="field-label">Stock Transport Sounds</span>
+                  <span className="sfx-sub-hint">Click any transport to audition</span>
+                </div>
+                <div className="sfx-grid">
+                  {TRANSPORTS.map((item) => {
+                    const isPlaying = previewingSfx === item.id;
+                    const isUsed = project.legs.some((leg) => leg.transport === item.id);
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`sfx-card ${isPlaying ? "playing" : ""} ${isUsed ? "in-route" : ""}`}
+                        onClick={() => auditionTransport(item.id, 1.7)}
+                      >
+                        <span className="sfx-icon" aria-hidden="true">
+                          {item.icon}
+                        </span>
+                        <span className="sfx-info">
+                          <strong>
+                            {item.label}
+                            {isUsed ? <em className="sfx-used-pill">In route</em> : null}
+                          </strong>
+                          <small>{item.soundLabel}</small>
+                        </span>
+                        <span className="sfx-play-badge">{isPlaying ? "🔊 Playing…" : "▶ Test"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="side-divider" />
+
+              <div className="option-group">
+                <span className="field-label">Background Soundtrack</span>
+                <p className="hint" style={{ marginBottom: 8 }}>
+                  Synthesized ambient soundtracks are mixed underneath your transport sound effects during video export.
+                </p>
+                {!limits.music ? <p className="notice">Music is a Pro feature. Free exports stay silent.</p> : null}
+                <div className="music-list">
+                  {[
+                    ["none", "🔇 No background music", "Only transport sound effects (or silent if SFX off)"],
+                    ["ambient", "🌌 Ambient Drift", "Warm atmospheric pads"],
+                    ["synthwave", "🌆 Synthwave Pulse", "Retro driving arpeggio"],
+                    ["cinematic", "🎻 Cinematic Horizon", "Deep orchestral swells"],
+                    ["folk", "🪕 Acoustic Trail", "Light plucked melody"],
+                  ].map(([id, label, desc]) => (
+                    <label key={id} className={`music-card ${project.style.music === id ? "on" : ""}`}>
+                      <input
+                        type="radio"
+                        name="music"
+                        checked={project.style.music === id}
+                        onChange={() => {
+                          if (id !== "none" && !limits.music) return setLock("Music is included with Pro.");
+                          update((current) => ({ ...current, style: { ...current.style, music: id as Project["style"]["music"] } }));
+                        }}
+                      />
+                      <div>
+                        <strong>{label}</strong>
+                        <small>{desc}</small>
+                      </div>
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
           ) : null}
@@ -1250,10 +1341,18 @@ export function Studio() {
             />
           ) : (
             <div className="studio-globe-stage">
-              <GlobeStage ref={inlineGlobe} project={project} pro={limits.pro} play="loop" />
+              <GlobeStage ref={inlineGlobe} project={project} pro={limits.pro} play="loop" enableAudio={stageAudio} />
               <div className="globe-stage-controls">
                 <button type="button" className="map-ctrl-btn text" onClick={() => inlineGlobe.current?.play()}>
                   ↻ Replay animation
+                </button>
+                <button
+                  type="button"
+                  className="map-ctrl-btn text"
+                  onClick={() => setStageAudio((v) => !v)}
+                  title="Toggle sound during live 3D globe preview"
+                >
+                  {stageAudio ? "🔊 Sound On" : "🔇 Muted"}
                 </button>
                 <button type="button" className="map-ctrl-btn text" onClick={() => setStageMode("map")}>
                   ✎ Back to 2D Map Editor
@@ -1290,6 +1389,7 @@ export function Studio() {
               project={project}
               pro={limits.pro}
               play="auto"
+              enableAudio
               onTime={(time, total) => setProgress(total ? time / total : 0)}
             />
             <div className="modal-actions">

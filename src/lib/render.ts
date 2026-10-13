@@ -25,7 +25,7 @@ export type Frame = {
   showUnderlay: number;
 };
 
-type Seg = { type: "intro" | "dwell" | "leg" | "outro"; index: number; dur: number; start: number };
+export type Seg = { type: "intro" | "dwell" | "leg" | "outro"; index: number; dur: number; start: number };
 
 function smooth(t: number) {
   const x = Math.min(1, Math.max(0, t));
@@ -97,7 +97,7 @@ function lerpAngle(a: number, b: number, t: number) {
   return value;
 }
 
-function buildSegs(project: Project, paths: [number, number][][]) {
+export function buildSegs(project: Project, paths: [number, number][][]) {
   const speed = project.style.speed || 1;
   const segs: Seg[] = [];
   let cursor = 0;
@@ -307,6 +307,8 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     legProgress: u,
     legIndex: seg.index,
     legDistances: project.style.units === "none" ? stops.map(() => null) : dists,
+    totalDistanceKm: null,
+    outroProgress: 0,
     photoStop: null,
     photoU: 0,
     distanceKm: project.style.units === "none" ? null : curDist,

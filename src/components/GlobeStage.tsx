@@ -2,8 +2,8 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { buildPaths } from "@/lib/geo";
-import { startMusic } from "@/lib/music";
-import { animationDuration, drawFrame } from "@/lib/render";
+import { createAudioSession, type AudioSession } from "@/lib/music";
+import { animationDuration, buildSegs, drawFrame } from "@/lib/render";
 import { frameSize, legAllowed, presentStyle, type Project } from "@/lib/types";
 import { loadCountries, type CountryShape } from "@/lib/world";
 
@@ -19,6 +19,7 @@ type Props = {
   project: Project;
   play?: PlayMode;
   pro?: boolean;
+  enableAudio?: boolean;
   size?: { w: number; h: number };
   className?: string;
   onTime?: (time: number, total: number) => void;
@@ -26,7 +27,7 @@ type Props = {
 };
 
 export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
-  { project, play = "manual", pro = true, size, className, onTime, onEnded },
+  { project, play = "manual", pro = true, enableAudio = false, size, className, onTime, onEnded },
   ref
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -117,12 +118,61 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     };
   }, [photoKey, shown.stops]);
 
-  const paint = (time: number) => {
+  const liveAudioRef = useRef<AudioSession | null>(null);
+  const lastSegKeyRef = useRef<string>("");
+
+  const stopLiveAudio = () => {
+    liveAudioRef.current?.stop();
+    liveAudioRef.current = null;
+    lastSegKeyRef.current = "";
+  };
+
+  const syncAudioAtTime = (session: AudioSession | null, time: number) => {
+    if (!session || !shown.stops.length) return;
+    const { segs, total } = buildSegs(shown, paths);
+    const t = Math.max(0, Math.min(time, Math.max(total - 0.001, 0)));
+    const seg = segs.find((item) => t < item.start + item.dur) ?? segs[segs.length - 1];
+    if (!seg) return;
+    const key = `${seg.type}:${seg.index}`;
+    if (key === lastSegKeyRef.current) return;
+    const prevKey = lastSegKeyRef.current;
+    lastSegKeyRef.current = key;
+    if (seg.type === "leg") {
+      const transport = shown.legs[seg.index]?.transport ?? "plane";
+      const remaining = Math.max(0.4, seg.dur - (t - seg.start));
+      session.triggerLeg(transport, remaining);
+    } else if (seg.type === "dwell" && seg.index > 0 && prevKey.startsWith("leg:")) {
+      session.triggerArrival();
+    } else {
+      session.stopLeg();
+    }
+  };
+
+  const paint = (time: number, audioSession: AudioSession | null = liveAudioRef.current) => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx || !countries) return;
     drawFrame(ctx, countries, shown, paths, images, time);
+    if (playing.current || recording.current) {
+      syncAudioAtTime(audioSession, time);
+    }
     onTimeRef.current?.(Math.min(time, duration), duration);
+  };
+
+  const startLiveAudioIfEnabled = () => {
+    stopLiveAudio();
+    if (!enableAudio) return;
+    createAudioSession({
+      music: shown.style.music,
+      soundEffects: shown.style.soundEffects ?? true,
+    }).then((session) => {
+      if (!playing.current || recording.current) {
+        session?.stop();
+        return;
+      }
+      liveAudioRef.current = session;
+      syncAudioAtTime(session, elapsed.current);
+    });
   };
 
   const step = (id: number) => (now: number) => {
@@ -137,12 +187,14 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     }
     playing.current = false;
     if (play === "loop") {
+      lastSegKeyRef.current = "";
       elapsed.current = 0;
       started.current = null;
       playing.current = true;
       raf.current = requestAnimationFrame(step(id));
       return;
     }
+    stopLiveAudio();
     onEndedRef.current?.();
   };
 
@@ -152,12 +204,14 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     elapsed.current = 0;
     started.current = null;
     playing.current = true;
+    startLiveAudioIfEnabled();
     raf.current = requestAnimationFrame(step(id));
   };
 
   const pause = () => {
     playing.current = false;
     cancelAnimationFrame(raf.current);
+    stopLiveAudio();
   };
 
   useEffect(() => {
@@ -173,9 +227,10 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     if (recording.current) return;
     cancelAnimationFrame(raf.current);
     playing.current = false;
+    stopLiveAudio();
     if (!ready || !countries) return;
     if (play === "freeze-end") {
-      paint(Math.max(0, duration - 0.05));
+      paint(Math.max(0, duration - 0.05), null);
       return;
     }
     if (play === "auto" || play === "loop") {
@@ -183,18 +238,20 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
       elapsed.current = 0;
       started.current = null;
       playing.current = true;
+      startLiveAudioIfEnabled();
       raf.current = requestAnimationFrame(step(id));
     } else {
-      paint(0);
+      paint(0, null);
     }
     return () => {
       if (recording.current) return;
       playing.current = false;
       cancelAnimationFrame(raf.current);
+      stopLiveAudio();
     };
     // Restart only when the route, frame, or look changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, countries, play, signature, pixels.w, pixels.h, photoKey, styleKey]);
+  }, [ready, countries, play, enableAudio, signature, pixels.w, pixels.h, photoKey, styleKey]);
 
   useImperativeHandle(ref, () => ({
     play: playNow,
@@ -206,12 +263,16 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
       const id = ++playId.current;
       cancelAnimationFrame(raf.current);
       playing.current = false;
+      stopLiveAudio();
       recording.current = true;
       const total = Math.max(animationDuration(shown, paths), 0.4);
       const fps = shown.style.fps;
       const stream = canvas.captureStream(fps);
-      const music = shown.style.music === "none" ? null : await startMusic(shown.style.music);
-      music?.dest.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
+      const audioSession = await createAudioSession({
+        music: shown.style.music,
+        soundEffects: shown.style.soundEffects ?? true,
+      });
+      audioSession?.dest.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
       const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
       const mimeType = candidates.find((item) => MediaRecorder.isTypeSupported(item)) ?? "";
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType, videoBitsPerSecond: 7_000_000 } : undefined);
@@ -223,12 +284,13 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
         recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType || "video/webm" }));
       });
       recorder.start(200);
+      lastSegKeyRef.current = "";
       const startedAt = performance.now();
       await new Promise<void>((resolve) => {
         const tick = (now: number) => {
           if (playId.current !== id) return resolve();
           const time = (now - startedAt) / 1000;
-          paint(Math.min(time, total));
+          paint(Math.min(time, total), audioSession);
           if (time < total) {
             raf.current = requestAnimationFrame(tick);
             return;
@@ -245,14 +307,21 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
           setTimeout(() => resolve(new Blob(chunks, { type: mimeType || "video/webm" })), 1200)
         ),
       ]);
-      music?.stop();
+      audioSession?.stop();
+      lastSegKeyRef.current = "";
       stream.getTracks().forEach((track) => track.stop());
       recording.current = false;
       return blob;
     },
   }));
 
-  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(raf.current);
+      stopLiveAudio();
+    },
+    []
+  );
 
   return (
     <div className={className ? `stage-wrap ${className}` : "stage-wrap"}>

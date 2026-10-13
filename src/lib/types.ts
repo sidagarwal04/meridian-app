@@ -49,6 +49,7 @@ export type Style = {
   showFullRouteAtEnd: boolean;
   showCountryFlags: boolean;
   music: MusicId;
+  soundEffects: boolean;
   aspect: Aspect;
   fps: 30 | 60;
   resolution: "768" | "1080";
@@ -105,20 +106,21 @@ export const TRANSPORTS: {
   icon: string;
   tier: "free" | "pro";
   kind: "air" | "land" | "sea" | "draw";
+  soundLabel: string;
 }[] = [
-  { id: "plane", label: "Airplane", icon: "✈", tier: "free", kind: "air" },
-  { id: "line", label: "Line", icon: "—", tier: "free", kind: "draw" },
-  { id: "dot", label: "Dots", icon: "•", tier: "free", kind: "draw" },
-  { id: "helicopter", label: "Helicopter", icon: "🚁", tier: "pro", kind: "air" },
-  { id: "car", label: "Car", icon: "🚗", tier: "pro", kind: "land" },
-  { id: "bus", label: "Bus", icon: "🚌", tier: "pro", kind: "land" },
-  { id: "train", label: "Train", icon: "🚆", tier: "pro", kind: "land" },
-  { id: "motorcycle", label: "Motorcycle", icon: "🏍", tier: "pro", kind: "land" },
-  { id: "tuktuk", label: "Tuk-tuk", icon: "🛺", tier: "pro", kind: "land" },
-  { id: "camper", label: "Camper", icon: "🚐", tier: "pro", kind: "land" },
-  { id: "bike", label: "Bicycle", icon: "🚲", tier: "pro", kind: "land" },
-  { id: "walk", label: "Walking", icon: "🚶", tier: "pro", kind: "land" },
-  { id: "boat", label: "Boat", icon: "🚢", tier: "pro", kind: "sea" },
+  { id: "plane", label: "Airplane", icon: "✈", tier: "free", kind: "air", soundLabel: "Jet turbine & flyby whoosh" },
+  { id: "line", label: "Line", icon: "—", tier: "free", kind: "draw", soundLabel: "Cinematic air swoosh" },
+  { id: "dot", label: "Dots", icon: "•", tier: "free", kind: "draw", soundLabel: "Rhythmic pops & swoosh" },
+  { id: "helicopter", label: "Helicopter", icon: "🚁", tier: "pro", kind: "air", soundLabel: "Rotor blade chop & turbine" },
+  { id: "car", label: "Car", icon: "🚗", tier: "pro", kind: "land", soundLabel: "Highway engine & road whoosh" },
+  { id: "bus", label: "Bus", icon: "🚌", tier: "pro", kind: "land", soundLabel: "Coach diesel & air brake" },
+  { id: "train", label: "Train", icon: "🚆", tier: "pro", kind: "land", soundLabel: "Rail clackety-clack & horn" },
+  { id: "motorcycle", label: "Motorcycle", icon: "🏍", tier: "pro", kind: "land", soundLabel: "Twin-cylinder throttle rev" },
+  { id: "tuktuk", label: "Tuk-tuk", icon: "🛺", tier: "pro", kind: "land", soundLabel: "2-stroke put-put & beep-beep" },
+  { id: "camper", label: "Camper", icon: "🚐", tier: "pro", kind: "land", soundLabel: "Cruiser van hum & coastal breeze" },
+  { id: "bike", label: "Bicycle", icon: "🚲", tier: "pro", kind: "land", soundLabel: "Bicycle bell ding & freewheel" },
+  { id: "walk", label: "Walking", icon: "🚶", tier: "pro", kind: "land", soundLabel: "Trail footsteps & breeze" },
+  { id: "boat", label: "Boat", icon: "🚢", tier: "pro", kind: "sea", soundLabel: "Ocean waves & ship horn" },
 ];
 
 export const THEMES: Record<
@@ -211,6 +213,7 @@ export function defaultStyle(): Style {
     showFullRouteAtEnd: true,
     showCountryFlags: true,
     music: "none",
+    soundEffects: true,
     aspect: "16:9",
     fps: 30,
     resolution: "768",
@@ -309,6 +312,7 @@ export function presentStyle(style: Style, pro: boolean): Style {
     labelColor: pro ? style.labelColor : palette.labelColor,
     showLogo: pro ? style.showLogo : true,
     music: pro ? style.music : "none",
+    soundEffects: style.soundEffects ?? true,
     fps: pro && style.fps === 60 ? 60 : 30,
     resolution: pro && style.resolution === "1080" ? "1080" : "768",
     highlightCountries: pro ? style.highlightCountries : true,

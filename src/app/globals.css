@@ -1540,6 +1540,34 @@ img {
   border-color: var(--line-strong);
 }
 
+.leg-sfx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.leg-sfx-btn:hover {
+  border-color: var(--blue-2);
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.leg-sfx-btn.playing {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.24);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+}
+
 .leg-distance {
   font-size: 11px;
   color: #64748b;
@@ -1780,6 +1808,151 @@ img {
 .music-card small {
   font-size: 12px;
   color: var(--muted);
+}
+
+.sfx-toggle-card {
+  background: linear-gradient(145deg, rgba(30, 41, 59, 0.75), rgba(15, 23, 42, 0.9));
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.sfx-toggle-row {
+  align-items: flex-start;
+}
+
+.sfx-toggle-row input[type="checkbox"] {
+  margin-top: 3px;
+}
+
+.sfx-toggle-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.sfx-toggle-row strong {
+  font-size: 13.5px;
+  color: #f8fafc;
+}
+
+.sfx-toggle-row small {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.sfx-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sfx-sub-hint {
+  font-size: 11.5px;
+  color: #94a3b8;
+}
+
+.sfx-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.sfx-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: #131c31;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: #f1f5f9;
+}
+
+.sfx-card:hover {
+  border-color: var(--line-strong);
+  background: #17223b;
+}
+
+.sfx-card.in-route {
+  border-color: rgba(56, 189, 248, 0.32);
+}
+
+.sfx-card.playing {
+  background: rgba(37, 99, 235, 0.22);
+  border-color: #38bdf8;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.22);
+}
+
+.sfx-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+.sfx-info {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.sfx-info strong {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sfx-info small {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sfx-used-pill {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.16);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.sfx-play-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sfx-card.playing .sfx-play-badge {
+  color: #fff;
+  background: var(--blue);
+  border-color: #38bdf8;
 }
 
 /* =========================================
