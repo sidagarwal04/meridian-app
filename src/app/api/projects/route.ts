@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 import { authOptions } from "@/auth";
 import { listCloudProjects, saveCloudProject } from "@/lib/cloudStore";
+import { recordTripSaved } from "@/lib/telemetry";
 import type { Project } from "@/lib/types";
 
 export async function GET() {
@@ -33,12 +34,17 @@ export async function POST(req: Request) {
       const saved = await Promise.all(
         body.projects
           .filter((p): p is Project => Boolean(p && p.id))
-          .map((p) => saveCloudProject(email, p))
+          .map(async (p) => {
+            const item = await saveCloudProject(email, p);
+            void recordTripSaved(email, item).catch(() => {});
+            return item;
+          })
       );
       return NextResponse.json({ projects: saved });
     }
     if (body.project && body.project.id) {
       const saved = await saveCloudProject(email, body.project);
+      void recordTripSaved(email, saved).catch(() => {});
       return NextResponse.json({ project: saved });
     }
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });

@@ -608,6 +608,21 @@ export function Studio() {
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
       setNotice(`${format.toUpperCase()} downloaded.`);
+      void fetch("/api/telemetry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "export",
+          projectId: project.id,
+          title: project.title,
+          format,
+          aspect: project.style.aspect,
+          resolution: project.style.resolution,
+          fps: project.style.fps,
+          stopsCount: project.stops.length,
+        }),
+        keepalive: true,
+      }).catch(() => {});
     } catch {
       setNotice("This browser couldn't record the canvas. Try Chrome or Safari, then export again.");
     } finally {

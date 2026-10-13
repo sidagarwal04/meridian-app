@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "./AuthProvider";
 import { Logo } from "./Logo";
 import { GITHUB_REPO_URL } from "./SiteFooter";
+import { isAdminEmail } from "@/lib/admin";
 import { useI18n } from "@/lib/i18n";
 
 export function GitHubMark({ size = 18 }: { size?: number }) {
@@ -48,6 +49,11 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
           <Link href="/support" className={pathname === "/support" ? "active" : ""}>
             {t("support")}
           </Link>
+          {isAdminEmail(user?.email) ? (
+            <Link href="/admin" className={pathname === "/admin" ? "active" : ""} title="Private Admin Telemetry">
+              🔒 Admin
+            </Link>
+          ) : null}
         </nav>
       ) : null}
       <div className="header-actions">
@@ -110,6 +116,11 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
           <Link href="/support" onClick={() => setOpen(false)}>
             🛟 {t("support")}
           </Link>
+          {isAdminEmail(user?.email) ? (
+            <Link href="/admin" onClick={() => setOpen(false)}>
+              🔒 Private Admin Stats
+            </Link>
+          ) : null}
           <div className="menu-divider" />
           {user ? (
             <button

@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 import { authOptions } from "@/auth";
 import { deleteCloudProject, getCloudProject, saveCloudProject } from "@/lib/cloudStore";
+import { recordTripSaved } from "@/lib/telemetry";
 import type { Project } from "@/lib/types";
 
 export async function GET(_req: Request, context: { params: Promise<{ id: string }> }) {
@@ -38,6 +39,7 @@ export async function PUT(req: Request, context: { params: Promise<{ id: string 
       return NextResponse.json({ error: "Missing project" }, { status: 400 });
     }
     const saved = await saveCloudProject(email, { ...body.project, id });
+    void recordTripSaved(email, saved).catch(() => {});
     return NextResponse.json({ project: saved });
   } catch (err) {
     console.error("Failed to update cloud project:", err);

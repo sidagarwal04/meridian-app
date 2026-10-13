@@ -1,5 +1,6 @@
 import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
+import { recordUserSignIn } from "@/lib/telemetry";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -16,4 +17,15 @@ export const authOptions: NextAuthOptions = {
   },
   session: { strategy: "jwt" },
   secret: process.env.NEXTAUTH_SECRET,
+  events: {
+    signIn({ user }) {
+      if (user?.email) {
+        void recordUserSignIn({
+          email: user.email,
+          name: user.name,
+          image: user.image,
+        }).catch(() => {});
+      }
+    },
+  },
 };
