@@ -17,6 +17,8 @@ export type Frame = {
   legProgress: number | null;
   legIndex: number | null;
   legDistances: (number | null)[];
+  totalDistanceKm: number | null;
+  outroProgress: number;
   photoStop: number | null;
   photoU: number;
   distanceKm: number | null;
@@ -35,12 +37,16 @@ function quinticInOut(t: number) {
   return x < 0.5 ? 16 * x * x * x * x * x : 1 - Math.pow(-2 * x + 2, 5) / 2;
 }
 
+// Continuous distance-aware camera zoom factor so nearby places zoom in deep enough that labels never overlap
 function zoomFor(km: number) {
-  if (km > 7000) return 0.52;
-  if (km > 3500) return 0.72;
-  if (km > 1500) return 0.98;
-  if (km > 500) return 1.32;
-  return 1.68;
+  const d = Math.max(25, km || 700);
+  if (d >= 8500) return 0.5;
+  if (d >= 4500) return 0.5 + ((8500 - d) / 4000) * 0.24; // 0.50 -> 0.74
+  if (d >= 2000) return 0.74 + ((4500 - d) / 2500) * 0.34; // 0.74 -> 1.08
+  if (d >= 900) return 1.08 + ((2000 - d) / 1100) * 0.52; // 1.08 -> 1.60
+  if (d >= 400) return 1.6 + ((900 - d) / 500) * 0.85; // 1.60 -> 2.45
+  if (d >= 150) return 2.45 + ((400 - d) / 250) * 1.05; // 2.45 -> 3.50
+  return Math.min(4.6, 3.5 + ((150 - d) / 125) * 1.1); // 3.50 -> 4.60 for very close cities
 }
 
 function fitFactor(stops: Project["stops"]) {
@@ -52,7 +58,7 @@ function fitFactor(stops: Project["stops"]) {
     lon += s.lon;
   });
   const c = { lat: lat / stops.length, lon: lon / stops.length };
-  let maxKm = 400;
+  let maxKm = 250;
   stops.forEach((s) => {
     const km = pathKm([
       [c.lon, c.lat],
@@ -60,7 +66,7 @@ function fitFactor(stops: Project["stops"]) {
     ]);
     maxKm = Math.max(maxKm, km);
   });
-  return Math.max(0.45, Math.min(1.5, zoomFor(maxKm * 2.05)));
+  return Math.max(0.46, Math.min(2.4, zoomFor(maxKm * 2.15)));
 }
 
 function centroid(stops: Project["stops"]) {
@@ -111,7 +117,7 @@ function buildSegs(project: Project, paths: [number, number][][]) {
     push("leg", index, dur);
     push("dwell", index + 1, dwellOf(project, index + 1) / speed);
   });
-  push("outro", project.stops.length - 1, (project.style.endZoom || project.style.showFullRouteAtEnd ? 1.75 : 0.4) / speed);
+  push("outro", project.stops.length - 1, (project.style.endZoom || project.style.showFullRouteAtEnd ? 2.25 : 0.85) / speed);
   return { segs, total: cursor };
 }
 
@@ -149,6 +155,8 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     legProgress: null,
     legIndex: null,
     legDistances: stops.map(() => null),
+    totalDistanceKm: null,
+    outroProgress: 0,
     photoStop: null,
     photoU: 0,
     distanceKm: null,
@@ -157,11 +165,29 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
   if (!stops.length || !seg) return empty;
 
   const legKms = project.legs.map((_, idx) => pathKm(paths[idx] ?? []));
+  const totalRouteKm = legKms.reduce((sum, d) => sum + d, 0);
 
-  const close = (index: number, km = 700) => ({
+  // Compute zoom factor at each stop based on the nearest neighbor / adjacent leg so nearby cities zoom in deeply
+  const stopFactors = stops.map((stop, idx) => {
+    const adjacent: number[] = [];
+    if (idx > 0 && legKms[idx - 1] > 0) adjacent.push(legKms[idx - 1]);
+    if (idx < legKms.length && legKms[idx] > 0) adjacent.push(legKms[idx]);
+    stops.forEach((other, j) => {
+      if (j === idx) return;
+      const d = pathKm([
+        [stop.lon, stop.lat],
+        [other.lon, other.lat],
+      ]);
+      if (d > 0) adjacent.push(d);
+    });
+    const nearestKm = adjacent.length ? Math.min(...adjacent) : 700;
+    return Math.max(zoomFor(nearestKm), 0.72);
+  });
+
+  const close = (index: number, km?: number) => ({
     lon: stops[index].lon,
     lat: stops[index].lat,
-    factor: Math.max(zoomFor(km), 0.72),
+    factor: km != null ? Math.max(stopFactors[index], zoomFor(km)) : stopFactors[index],
   });
 
   if (seg.type === "intro") {
@@ -188,7 +214,7 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     const lastLegKm = legKms[legKms.length - 1] || 800;
     const from = close(seg.index, lastLegKm);
     const to = project.style.showFullRouteAtEnd || project.style.endZoom ? fit : from;
-    const e = quinticInOut(rawU);
+    const e = quinticInOut(Math.min(1, rawU * 1.25));
     const dists = stops.map((_, i) => (i === 0 ? null : legKms[i - 1] || null));
     return {
       ...empty,
@@ -202,6 +228,8 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
       labelIndexes: indexesFor(project.style, stops.length, stops.length - 1, "outro"),
       activeStopIndex: seg.index,
       legDistances: project.style.units === "none" ? stops.map(() => null) : dists,
+      totalDistanceKm: project.style.units === "none" || totalRouteKm < 1 ? null : totalRouteKm,
+      outroProgress: smooth(Math.max(0, (rawU - 0.18) / 0.55)),
       head: [stops[seg.index].lon, stops[seg.index].lat],
       showUnderlay: 0.16,
     };
@@ -214,6 +242,7 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     // Subtle cinematic push-in during dwell
     const dwellBoost = 1 + 0.05 * Math.sin(rawU * Math.PI);
     const dists = stops.map((_, i) => (i > 0 && i <= seg.index ? legKms[i - 1] || null : null));
+    const isFinalStopDwell = seg.index === stops.length - 1 && stops.length > 1;
     return {
       ...empty,
       camera: { ...baseCam, factor: baseCam.factor * dwellBoost },
@@ -223,6 +252,9 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
       labelIndexes: indexesFor(project.style, stops.length, seg.index, "dwell"),
       activeStopIndex: seg.index,
       legDistances: project.style.units === "none" ? stops.map(() => null) : dists,
+      totalDistanceKm:
+        isFinalStopDwell && project.style.units !== "none" && totalRouteKm >= 1 ? totalRouteKm : null,
+      outroProgress: isFinalStopDwell ? smooth(Math.max(0, (rawU - 0.35) / 0.65)) * 0.85 : 0,
       photoStop: stops[seg.index].photos.length ? seg.index : null,
       photoU: rawU,
       showUnderlay: 0.15,
@@ -246,8 +278,10 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
   // Camera zoom arcs out slightly at mid-flight and zooms in as approaching destination
   const startFactor = close(seg.index, km || 800).factor;
   const endFactor = close(seg.index + 1, km || 800).factor;
-  const midDip = Math.sin(u * Math.PI) * Math.min(0.28, (km || 600) / 12000);
-  const camFactor = Math.max(0.44, startFactor + (endFactor - startFactor) * u - midDip);
+  const legScaleFactor = zoomFor(km || 800);
+  const baseFactor = Math.max(legScaleFactor, startFactor + (endFactor - startFactor) * u);
+  const midDip = Math.sin(u * Math.PI) * Math.min(0.24, (km || 600) / 14000);
+  const camFactor = Math.max(0.46, baseFactor - midDip);
 
   const transport = project.legs[seg.index]?.transport ?? "plane";
   const meta = transportMeta(transport);
@@ -806,7 +840,14 @@ export function drawFrame(
 
   // 9. Floating Glassmorphic City & Country Callout Cards + "+XXXX km" Distance Counter
   const taken: { x: number; y: number; w: number; h: number }[] = [];
-  frame.labelIndexes.forEach((index) => {
+  // Process active stop first so its label always wins priority and nearby labels smartly shift or hide
+  const orderedLabels = [...frame.labelIndexes].sort((a, b) => {
+    if (a === frame.activeStopIndex) return -1;
+    if (b === frame.activeStopIndex) return 1;
+    return b - a;
+  });
+
+  orderedLabels.forEach((index) => {
     const stop = project.stops[index];
     const xy = projection([stop.lon, stop.lat]);
     if (!xy) return;
@@ -830,12 +871,30 @@ export function drawFrame(
     const cardH = secondary ? titleFont + subFont + padY * 2.1 : titleFont + padY * 1.8;
 
     const pinOffset = Math.max(14, w / 56);
-    const cardX = xy[0] - cardW / 2;
-    const cardY = xy[1] - cardH - pinOffset;
+    const candidates = [
+      { x: xy[0] - cardW / 2, y: xy[1] - cardH - pinOffset, distAbove: false },
+      { x: xy[0] - cardW / 2, y: xy[1] + pinOffset * 1.9, distAbove: true },
+      { x: xy[0] + pinOffset * 1.35, y: xy[1] - cardH / 2, distAbove: false },
+      { x: xy[0] - cardW - pinOffset * 1.35, y: xy[1] - cardH / 2, distAbove: false },
+    ];
 
-    const rect = { x: cardX - 4, y: cardY - 4, w: cardW + 8, h: cardH + 24 };
-    if (project.style.optimizeLabels && !isActive && taken.some((box) => intersects(box, rect))) return;
-    taken.push(rect);
+    let chosen = candidates[0];
+    let hasCollision = false;
+    for (const cand of candidates) {
+      const box = { x: cand.x - 6, y: cand.y - 6, w: cardW + 12, h: cardH + 26 };
+      if (!taken.some((existing) => intersects(existing, box))) {
+        chosen = cand;
+        hasCollision = false;
+        break;
+      }
+      hasCollision = true;
+    }
+
+    if (hasCollision && project.style.optimizeLabels && !isActive) return;
+
+    const cardX = chosen.x;
+    const cardY = chosen.y;
+    taken.push({ x: cardX - 6, y: cardY - 6, w: cardW + 12, h: cardH + 26 });
 
     // Translucent dark charcoal glassmorphic pill card (mult.dev style)
     ctx.save();
@@ -861,35 +920,92 @@ export function drawFrame(
     ctx.textBaseline = "middle";
     ctx.font = `700 ${titleFont}px Inter, system-ui, sans-serif`;
     const titleY = secondary ? cardY + padY + titleFont * 0.48 : cardY + cardH / 2;
-    ctx.fillText(primary, xy[0], titleY);
+    ctx.fillText(primary, cardX + cardW / 2, titleY);
 
     // Flag + Country subtitle
     if (secondary) {
       ctx.font = `500 ${subFont}px Inter, system-ui, sans-serif`;
       ctx.fillStyle = palette.stars ? "rgba(241, 245, 249, 0.9)" : "rgba(30, 41, 59, 0.85)";
       const subY = cardY + cardH - padY - subFont * 0.42;
-      ctx.fillText(secondary, xy[0], subY);
+      ctx.fillText(secondary, cardX + cardW / 2, subY);
     }
     ctx.restore();
 
-    // "+XXXX km" Distance Counter below the waypoint marker (mult.dev style)
+    // "+XXXX km" Distance Counter near the waypoint marker (mult.dev style)
     const stopDistKm = frame.legDistances[index];
-    if (stopDistKm != null && stopDistKm >= 1) {
+    if (stopDistKm != null && stopDistKm >= 1 && frame.outroProgress < 0.75) {
       const val = project.style.units === "mi" ? Math.round(stopDistKm * 0.621371) : Math.round(stopDistKm);
       const unitLabel = project.style.units === "mi" ? "mi" : "km";
       const distText = `+${val} ${unitLabel}`;
       const distFont = Math.round(Math.max(12, w / 56));
       ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - frame.outroProgress * 1.15);
       ctx.font = `700 ${distFont}px Inter, system-ui, sans-serif`;
       ctx.textAlign = "center";
-      ctx.textBaseline = "top";
+      ctx.textBaseline = chosen.distAbove ? "bottom" : "top";
       ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
       ctx.shadowBlur = 8;
       ctx.fillStyle = isActive ? "rgba(255, 255, 255, 0.96)" : "rgba(226, 232, 240, 0.78)";
-      ctx.fillText(distText, xy[0], xy[1] + Math.max(13, w / 54));
+      const distY = chosen.distAbove ? xy[1] - Math.max(12, w / 58) : xy[1] + Math.max(13, w / 54);
+      ctx.fillText(distText, xy[0], distY);
       ctx.restore();
     }
   });
+
+  // 10. Total Distance Travelled Summary Pill towards the end of the animation
+  if (frame.totalDistanceKm != null && frame.outroProgress > 0.02) {
+    const alpha = Math.min(1, frame.outroProgress);
+    const totalVal =
+      project.style.units === "mi"
+        ? Math.round(frame.totalDistanceKm * 0.621371)
+        : Math.round(frame.totalDistanceKm);
+    const unitLabel = project.style.units === "mi" ? "mi" : "km";
+    const valueText = `${totalVal.toLocaleString()} ${unitLabel}`;
+    const captionText = `TOTAL DISTANCE · ${project.stops.length} ${project.stops.length === 1 ? "PLACE" : "PLACES"}`;
+
+    const bigFont = Math.round(Math.max(18, w / 34));
+    const capFont = Math.round(Math.max(10, w / 76));
+
+    ctx.save();
+    ctx.font = `800 ${bigFont}px Inter, system-ui, sans-serif`;
+    const valW = ctx.measureText(valueText).width;
+    ctx.font = `700 ${capFont}px Inter, system-ui, sans-serif`;
+    const capW = ctx.measureText(captionText).width;
+
+    const pillW = Math.max(valW, capW) + Math.max(36, w / 18);
+    const pillH = bigFont + capFont + Math.max(20, w / 42);
+    const slideY = (1 - alpha) * 14;
+    const pillX = w / 2 - pillW / 2;
+    const pillY = h - pillH - Math.max(22, h * 0.05) + slideY;
+
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = palette.stars ? "rgba(14, 19, 30, 0.86)" : "rgba(255, 255, 255, 0.94)";
+    ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
+    ctx.shadowBlur = 22;
+    ctx.shadowOffsetY = 6;
+    roundRect(ctx, pillX, pillY, pillW, pillH, Math.max(14, w / 54));
+    ctx.fill();
+
+    ctx.strokeStyle = line;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    // Caption line
+    ctx.font = `700 ${capFont}px Inter, system-ui, sans-serif`;
+    ctx.fillStyle = palette.stars ? "rgba(148, 163, 184, 0.95)" : "rgba(71, 85, 105, 0.9)";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText(captionText, w / 2, pillY + Math.max(8, pillH * 0.16));
+
+    // Total distance readout
+    ctx.font = `800 ${bigFont}px Inter, system-ui, sans-serif`;
+    ctx.fillStyle = label;
+    ctx.textBaseline = "bottom";
+    ctx.fillText(valueText, w / 2, pillY + pillH - Math.max(7, pillH * 0.13));
+    ctx.restore();
+  }
 
   // 10. Stop Photo Polaroid Overlay during pause
   if (frame.photoStop != null) {
@@ -936,12 +1052,43 @@ export function drawFrame(
     ctx.save();
     ctx.font = `700 ${size}px Inter, system-ui, sans-serif`;
     ctx.textAlign = "right";
-    ctx.textBaseline = "bottom";
+    ctx.textBaseline = "middle";
     ctx.fillStyle = label;
-    ctx.globalAlpha = 0.82;
+    ctx.globalAlpha = 0.85;
     ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
     ctx.shadowBlur = 6;
-    ctx.fillText("∞ Meridian", w - 22, h - 18);
+
+    const rightX = w - 22;
+    const centerY = h - 18 - size * 0.5;
+    const textW = ctx.measureText("Meridian").width;
+    ctx.fillText("Meridian", rightX, centerY);
+
+    const scale = (size * 1.24) / 24;
+    const gap = size * 0.4;
+    const iconOriginX = rightX - textW - gap - 19.5 * scale;
+    const iconOriginY = centerY - 12 * scale;
+
+    ctx.translate(iconOriginX, iconOriginY);
+    ctx.scale(scale, scale);
+    ctx.lineWidth = 1.65;
+    ctx.lineCap = "round";
+
+    ctx.strokeStyle = label;
+    ctx.beginPath();
+    ctx.arc(12, 12, 7.5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(4.5, 12.15);
+    ctx.bezierCurveTo(7.6, 14.2, 16.4, 14.2, 19.5, 12.15);
+    ctx.stroke();
+
+    ctx.strokeStyle = "#38BDF8";
+    ctx.beginPath();
+    ctx.moveTo(12, 4.5);
+    ctx.bezierCurveTo(16.5, 7.2, 16.5, 16.8, 12, 19.5);
+    ctx.stroke();
+
     ctx.restore();
   }
 }

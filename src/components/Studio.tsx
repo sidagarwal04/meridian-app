@@ -79,6 +79,8 @@ export function Studio() {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [showImports, setShowImports] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const globe = useRef<GlobeHandle>(null);
   const inlineGlobe = useRef<GlobeHandle>(null);
   const limits = limitsFor(null);
@@ -441,7 +443,9 @@ export function Studio() {
   const share = async () => {
     const url = `${window.location.origin}/r/${encodeRoute(project)}`;
     await navigator.clipboard.writeText(url);
-    setNotice("Share link copied. Photos stay on this device; the link carries the route.");
+    setCopied(true);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(false), 2200);
   };
 
   const renderVideo = async () => {
@@ -512,8 +516,12 @@ export function Studio() {
           <span className="credits-badge">
             {project.stops.length} stops · {totalDistanceKm.toLocaleString()} km
           </span>
-          <button className="btn ghost sm" onClick={share} title="Copy shareable route link">
-            Share
+          <button
+            className={`btn ghost sm${copied ? " copied" : ""}`}
+            onClick={share}
+            title="Copy shareable route link"
+          >
+            {copied ? "✓ Copied to clipboard" : "Share"}
           </button>
           <button className="btn ghost sm" onClick={() => setPreview(true)}>
             ▶ Preview
@@ -1288,8 +1296,8 @@ export function Studio() {
               <button className="btn ghost" onClick={() => globe.current?.play()} disabled={exporting}>
                 ↻ Replay
               </button>
-              <button className="btn ghost" onClick={share}>
-                🔗 Copy share link
+              <button className={`btn ghost${copied ? " copied" : ""}`} onClick={share}>
+                {copied ? "✓ Copied to clipboard" : "🔗 Copy share link"}
               </button>
               <button className="btn primary" onClick={renderVideo} disabled={exporting}>
                 {exporting ? `Rendering ${Math.round(progress * 100)}%…` : "⬇ Download WebM video"}

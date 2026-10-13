@@ -476,6 +476,13 @@ img {
   color: #fff;
 }
 
+.btn.copied,
+.btn.copied:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(52, 211, 153, 0.45);
+  color: #6ee7b7;
+}
+
 .btn.sm {
   padding: 7px 13px;
   font-size: 13px;
