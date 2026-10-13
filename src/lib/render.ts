@@ -1,5 +1,6 @@
 import { geoGraticule, geoOrthographic, geoPath, type GeoProjection } from "d3-geo";
 import { flagEmoji, pathKm, pointAlong, slicePath } from "./geo";
+import { drawShaderGlobe } from "./globeShader";
 import { THEMES, transportMeta, type Project, type Style, type ThemeId, type Transport } from "./types";
 import type { CountryShape } from "./world";
 
@@ -125,7 +126,7 @@ function dwellOf(project: Project, index: number) {
   const stop = project.stops[index];
   if (!stop) return 0.65;
   const photos = stop.photos.length;
-  return Math.max(stop.dwellSec || 1, photos ? 0.9 + photos * 0.7 : 0.85);
+  return Math.max(stop.dwellSec || 1.1, photos ? 1.85 + photos * 0.95 : 0.85);
 }
 
 export function animationDuration(project: Project, paths: [number, number][][]) {
@@ -205,6 +206,8 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
       full,
       labelIndexes: project.style.labels === "always" ? stops.map((_, i) => i) : [0],
       activeStopIndex: 0,
+      photoStop: rawU > 0.62 && stops[0]?.photos.length ? 0 : null,
+      photoU: 0,
       showUnderlay: 0.1 * e,
       head: [stops[0].lon, stops[0].lat],
     };
@@ -293,6 +296,14 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     return null;
   });
 
+  const legPhotoStop =
+    rawU < 0.14 && stops[seg.index]?.photos.length
+      ? seg.index
+      : rawU > 0.86 && stops[seg.index + 1]?.photos.length
+      ? seg.index + 1
+      : null;
+  const legPhotoU = rawU < 0.14 ? 0.99 : 0;
+
   return {
     camera: { lon: head[0], lat: head[1], factor: camFactor },
     revealed: [...full.slice(0, seg.index), slicePath(path, u)],
@@ -309,8 +320,8 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     legDistances: project.style.units === "none" ? stops.map(() => null) : dists,
     totalDistanceKm: null,
     outroProgress: 0,
-    photoStop: null,
-    photoU: 0,
+    photoStop: legPhotoStop,
+    photoU: legPhotoU,
     distanceKm: project.style.units === "none" ? null : curDist,
     showUnderlay: 0.14,
   };
@@ -331,6 +342,24 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
+}
+
+function drawCoverImage(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+) {
+  const iw = img.naturalWidth || img.width || 1;
+  const ih = img.naturalHeight || img.height || 1;
+  const scale = Math.max(w / iw, h / ih);
+  const sw = w / scale;
+  const sh = h / scale;
+  const sx = Math.max(0, (iw - sw) / 2);
+  const sy = Math.max(0, (ih - sh) / 2);
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
 }
 
 function drawStars(ctx: CanvasRenderingContext2D, w: number, h: number, time = 0) {
@@ -545,71 +574,145 @@ export function drawFrame(
   ctx.fillRect(0, 0, w, h);
   if (palette.stars) drawStars(ctx, w, h, time);
 
-  const cx = w / 2;
-  const cy = h / 2 + h * 0.02;
-  const globeRadius = frame.camera.factor * Math.min(w, h);
+  const minDim = Math.min(w, h);
+  const cameraView = project.style.cameraView ?? "horizon";
+  const rawFactor = frame.camera.factor;
+
+  let globeRadius = rawFactor * minDim;
+  let cx = w / 2;
+  let cy = h / 2 + h * 0.02;
+  let rotation: [number, number, number] = [-frame.camera.lon, -frame.camera.lat, 0];
+
+  if (cameraView !== "top") {
+    // Keep curved Earth horizon & blue atmosphere visible across the top/top-left even when deeply zoomed in!
+    const effFactor =
+      rawFactor <= 0.85 ? rawFactor : 0.85 + Math.pow(rawFactor - 0.85, 0.78) * 0.92;
+    globeRadius = effFactor * minDim;
+
+    const outroEase =
+      project.style.showFullRouteAtEnd || project.style.endZoom
+        ? 1 - frame.outroProgress * 0.42
+        : 1;
+    const zoomBlend = smooth((effFactor - 0.50) / 0.62) * outroEase;
+
+    // Desired distance in pixels from target city up to the curved Earth horizon
+    const limbRatio = cameraView === "horizon" ? 0.39 : 0.46;
+    const desiredLimbPx = Math.min(h * limbRatio, minDim * (limbRatio + 0.02));
+    const maxSinTilt = cameraView === "horizon" ? 0.885 : 0.76; // up to ~62.2° tilt for horizon mode
+    const sinTiltZoomed = Math.max(0.36, Math.min(maxSinTilt, 1 - desiredLimbPx / globeRadius));
+    const zoomedTiltDeg = (Math.asin(sinTiltZoomed) * 180) / Math.PI;
+    const baseOrbitalTilt = cameraView === "horizon" ? 19 : 14;
+    const tiltDeg = baseOrbitalTilt * (1 - zoomBlend) + zoomedTiltDeg * zoomBlend;
+
+    // Subtle dynamic camera roll/banking so the curved horizon sweeps across the top-left like orbital footage
+    const legBank =
+      frame.legProgress != null ? Math.sin(frame.legProgress * Math.PI) * 3.2 : 0;
+    const targetRoll = cameraView === "horizon" ? -13.5 : -7.5;
+    const rollDeg = -3.5 * (1 - zoomBlend) + (targetRoll + legBank) * zoomBlend;
+
+    rotation = [-frame.camera.lon, -frame.camera.lat + tiltDeg, rollDeg];
+
+    const tempProj = geoOrthographic()
+      .precision(0.3)
+      .rotate(rotation)
+      .translate([0, 0])
+      .scale(globeRadius);
+    const off = tempProj([frame.camera.lon, frame.camera.lat]) ?? [0, 0];
+    const targetX = w * (0.5 + 0.025 * zoomBlend);
+    const targetY = h * (0.51 + 0.065 * zoomBlend);
+    cx = targetX - off[0];
+    cy = targetY - off[1];
+  }
 
   const projection = geoOrthographic()
-    .precision(0.35)
-    .rotate([-frame.camera.lon, -frame.camera.lat])
+    .precision(0.3)
+    .rotate(rotation)
     .translate([cx, cy])
     .scale(globeRadius);
   const path = geoPath(projection, ctx);
 
-  // Crisp atmospheric horizon halo around the 3D sphere
-  if (palette.stars) {
-    const corona = ctx.createRadialGradient(cx, cy, globeRadius * 0.94, cx, cy, globeRadius * 1.14);
-    corona.addColorStop(0, "rgba(96, 165, 250, 0.26)");
-    corona.addColorStop(0.45, "rgba(37, 99, 235, 0.09)");
-    corona.addColorStop(1, "rgba(0, 0, 0, 0)");
-    ctx.fillStyle = corona;
-    ctx.beginPath();
-    ctx.arc(cx, cy, globeRadius * 1.14, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  // Render high-resolution WebGL 3D Satellite & Topographic Relief Globe (with 2D fallback while loading)
+  const renderedWithShader = drawShaderGlobe(ctx, {
+    w,
+    h,
+    cx,
+    cy,
+    scale: globeRadius,
+    rotation,
+    theme: project.style.theme,
+    projMode: "globe",
+    time,
+  });
 
-  // 1. Deep Bathymetric Ocean Sphere
-  ctx.beginPath();
-  path({ type: "Sphere" } as never);
-  ctx.fillStyle = palette.ocean;
-  ctx.fill();
-
-  if (palette.stars) {
-    ctx.save();
-    ctx.beginPath();
-    path({ type: "Sphere" } as never);
-    ctx.clip();
-    const oceanLight = ctx.createRadialGradient(
-      cx - globeRadius * 0.28,
-      cy - globeRadius * 0.28,
-      globeRadius * 0.04,
-      cx,
-      cy,
-      globeRadius * 1.04
-    );
-    oceanLight.addColorStop(0, isSatelliteLook ? "rgba(30, 88, 158, 0.55)" : "rgba(56, 189, 248, 0.22)");
-    oceanLight.addColorStop(0.55, isSatelliteLook ? "rgba(12, 42, 84, 0.25)" : "rgba(14, 165, 233, 0.05)");
-    oceanLight.addColorStop(1, "rgba(2, 6, 18, 0.65)");
-    ctx.fillStyle = oceanLight;
-    ctx.fillRect(cx - globeRadius - 4, cy - globeRadius - 4, globeRadius * 2 + 8, globeRadius * 2 + 8);
-    ctx.restore();
-  }
-
-  // 2. Shallow Coastal Shelf Bathymetry Glow around landmasses
-  if (isSatelliteLook) {
-    ctx.save();
-    ctx.beginPath();
-    path({ type: "Sphere" } as never);
-    ctx.clip();
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    countries.forEach((country) => {
+  if (!renderedWithShader) {
+    // Crisp atmospheric horizon halo around the 3D sphere
+    if (palette.stars) {
+      const corona = ctx.createRadialGradient(cx, cy, globeRadius * 0.94, cx, cy, globeRadius * 1.14);
+      corona.addColorStop(0, "rgba(96, 165, 250, 0.26)");
+      corona.addColorStop(0.45, "rgba(37, 99, 235, 0.09)");
+      corona.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = corona;
       ctx.beginPath();
+      ctx.arc(cx, cy, globeRadius * 1.14, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 1. Deep Bathymetric Ocean Sphere
+    ctx.beginPath();
+    path({ type: "Sphere" } as never);
+    ctx.fillStyle = palette.ocean;
+    ctx.fill();
+
+    if (palette.stars) {
+      ctx.save();
+      ctx.beginPath();
+      path({ type: "Sphere" } as never);
+      ctx.clip();
+      const oceanLight = ctx.createRadialGradient(
+        cx - globeRadius * 0.28,
+        cy - globeRadius * 0.28,
+        globeRadius * 0.04,
+        cx,
+        cy,
+        globeRadius * 1.04
+      );
+      oceanLight.addColorStop(0, isSatelliteLook ? "rgba(30, 88, 158, 0.55)" : "rgba(56, 189, 248, 0.22)");
+      oceanLight.addColorStop(0.55, isSatelliteLook ? "rgba(12, 42, 84, 0.25)" : "rgba(14, 165, 233, 0.05)");
+      oceanLight.addColorStop(1, "rgba(2, 6, 18, 0.65)");
+      ctx.fillStyle = oceanLight;
+      ctx.fillRect(cx - globeRadius - 4, cy - globeRadius - 4, globeRadius * 2 + 8, globeRadius * 2 + 8);
+      ctx.restore();
+    }
+
+    // 2. Shallow Coastal Shelf Bathymetry Glow around landmasses
+    if (isSatelliteLook) {
+      ctx.save();
+      ctx.beginPath();
+      path({ type: "Sphere" } as never);
+      ctx.clip();
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      countries.forEach((country) => {
+        ctx.beginPath();
+        path(country.feature as never);
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.14)";
+        ctx.lineWidth = Math.max(4, globeRadius * 0.018);
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+
+    // 3. Landmasses Base Fill + Multi-Biome Satellite Terrain Shading
+    ctx.save();
+    ctx.beginPath();
+    countries.forEach((country) => {
       path(country.feature as never);
-      ctx.strokeStyle = "rgba(56, 189, 248, 0.14)";
-      ctx.lineWidth = Math.max(4, globeRadius * 0.018);
-      ctx.stroke();
     });
+    ctx.fillStyle = palette.land;
+    ctx.fill();
+
+    ctx.clip();
+    drawSatelliteBiomeShading(ctx, projection, globeRadius, project.style.theme);
     ctx.restore();
   }
 
@@ -622,37 +725,6 @@ export function drawFrame(
   const activeCountryCode = project.stops[frame.activeStopIndex]?.code || "";
   if (!project.style.highlightCountries) visited.clear();
 
-  // 3. Landmasses Base Fill + Multi-Biome Satellite Terrain Shading
-  ctx.save();
-  ctx.beginPath();
-  countries.forEach((country) => {
-    path(country.feature as never);
-  });
-  ctx.fillStyle = palette.land;
-  ctx.fill();
-
-  // Clip to all land polygons and paint realistic satellite biomes (forests, deserts, snow peaks)
-  ctx.clip();
-  drawSatelliteBiomeShading(ctx, projection, globeRadius, project.style.theme);
-
-  // Directional spherical sunlight & relief shadow over landmasses
-  if (palette.stars) {
-    const landLight = ctx.createRadialGradient(
-      cx - globeRadius * 0.35,
-      cy - globeRadius * 0.35,
-      globeRadius * 0.08,
-      cx + globeRadius * 0.15,
-      cy + globeRadius * 0.15,
-      globeRadius * 1.1
-    );
-    landLight.addColorStop(0, "rgba(255, 255, 255, 0.12)");
-    landLight.addColorStop(0.6, "rgba(0, 0, 0, 0)");
-    landLight.addColorStop(1, "rgba(2, 6, 23, 0.48)");
-    ctx.fillStyle = landLight;
-    ctx.fillRect(cx - globeRadius - 4, cy - globeRadius - 4, globeRadius * 2 + 8, globeRadius * 2 + 8);
-  }
-  ctx.restore();
-
   // 4. Country Borders + Visited / Active Country Crisp White Border & Subtle Tint (mult.dev style)
   const highlightedCountries: CountryShape[] = [];
   countries.forEach((country) => {
@@ -662,12 +734,12 @@ export function drawFrame(
     }
     ctx.beginPath();
     path(country.feature as never);
-    ctx.lineWidth = Math.max(0.55, w / 1350);
+    ctx.lineWidth = Math.max(0.6, w / 1280);
     ctx.strokeStyle = palette.border;
     ctx.stroke();
   });
 
-  // Draw highlighted (visited/active) countries on top with translucent tint & crisp white outline
+  // Draw highlighted (visited/active) countries on top with translucent tint & crisp glowing white outline
   highlightedCountries.forEach((country) => {
     const isCurrent = country.code === activeCountryCode;
     ctx.save();
@@ -675,15 +747,15 @@ export function drawFrame(
     path(country.feature as never);
     ctx.fillStyle = isSatelliteLook
       ? isCurrent
-        ? "rgba(56, 189, 248, 0.16)"
-        : "rgba(56, 189, 248, 0.09)"
+        ? "rgba(125, 211, 252, 0.14)"
+        : "rgba(125, 211, 252, 0.08)"
       : palette.landHi;
     ctx.fill();
 
-    ctx.shadowColor = "rgba(255, 255, 255, 0.65)";
-    ctx.shadowBlur = isCurrent ? 6 : 3;
-    ctx.lineWidth = Math.max(1.25, w / 620);
-    ctx.strokeStyle = isCurrent ? "rgba(255, 255, 255, 0.96)" : "rgba(255, 255, 255, 0.78)";
+    ctx.shadowColor = "rgba(255, 255, 255, 0.78)";
+    ctx.shadowBlur = isCurrent ? 8 : 4;
+    ctx.lineWidth = Math.max(1.35, w / 580);
+    ctx.strokeStyle = isCurrent ? "rgba(255, 255, 255, 0.98)" : "rgba(255, 255, 255, 0.82)";
     ctx.stroke();
     ctx.restore();
   });
@@ -691,33 +763,24 @@ export function drawFrame(
   // Subtle graticule grid
   ctx.beginPath();
   path(geoGraticule()());
-  ctx.strokeStyle = palette.stars ? "rgba(255,255,255,0.035)" : "rgba(30,40,50,0.06)";
+  ctx.strokeStyle = palette.stars ? "rgba(255,255,255,0.028)" : "rgba(30,40,50,0.05)";
   ctx.lineWidth = 0.5;
   ctx.stroke();
 
-  // 5. 3D Spherical Limb Shadow & Atmospheric Rim Glow
-  if (palette.stars) {
-    ctx.save();
-    ctx.beginPath();
-    path({ type: "Sphere" } as never);
-    ctx.clip();
-    const rim = ctx.createRadialGradient(cx, cy, globeRadius * 0.76, cx, cy, globeRadius);
-    rim.addColorStop(0, "rgba(0, 0, 0, 0)");
-    rim.addColorStop(0.78, "rgba(2, 6, 20, 0.22)");
-    rim.addColorStop(0.95, "rgba(15, 23, 42, 0.48)");
-    rim.addColorStop(1, "rgba(147, 197, 253, 0.42)");
-    ctx.fillStyle = rim;
-    ctx.fillRect(cx - globeRadius - 2, cy - globeRadius - 2, globeRadius * 2 + 4, globeRadius * 2 + 4);
-    ctx.restore();
-  }
-
+  // 5. Crisp 3D Atmospheric Horizon Rim Line
+  ctx.save();
   ctx.beginPath();
   path({ type: "Sphere" } as never);
-  ctx.strokeStyle = palette.stars ? "rgba(147, 197, 253, 0.42)" : "rgba(40,50,60,0.28)";
-  ctx.lineWidth = Math.max(1.2, w / 680);
+  ctx.strokeStyle = palette.stars ? "rgba(125, 211, 252, 0.52)" : "rgba(40,50,60,0.28)";
+  ctx.lineWidth = Math.max(1.5, w / 580);
+  if (palette.stars) {
+    ctx.shadowColor = "rgba(56, 189, 248, 0.65)";
+    ctx.shadowBlur = 12;
+  }
   ctx.stroke();
+  ctx.restore();
 
-  // 6. Vibrant Electric Blue Route Path with Outer Glow
+  // 6. Vibrant Electric Blue Route Path with 3D Ground Shadow & Outer Glow
   const strokeRoute = (lines: [number, number][][], alpha: number, width: number, dash: boolean, glow: boolean) => {
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -725,13 +788,31 @@ export function drawFrame(
     ctx.lineCap = "round";
     ctx.setLineDash(dash ? [2, Math.max(8, width * 2.6)] : []);
 
+    // Subtle 3D ground shadow beneath elevated flight path
+    if (glow && !dash) {
+      ctx.save();
+      ctx.translate(0, Math.max(3, width * 0.95));
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.45)";
+      ctx.lineWidth = width * 1.15;
+      ctx.globalAlpha = alpha * 0.55;
+      ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+      ctx.shadowBlur = 6;
+      lines.forEach((coords) => {
+        if (coords.length < 2) return;
+        ctx.beginPath();
+        path({ type: "LineString", coordinates: coords });
+        ctx.stroke();
+      });
+      ctx.restore();
+    }
+
     if (glow && !dash) {
       ctx.save();
       ctx.strokeStyle = line;
-      ctx.lineWidth = width * 2.2;
-      ctx.globalAlpha = alpha * 0.26;
+      ctx.lineWidth = width * 2.3;
+      ctx.globalAlpha = alpha * 0.28;
       ctx.shadowColor = line;
-      ctx.shadowBlur = Math.max(10, w / 95);
+      ctx.shadowBlur = Math.max(10, w / 90);
       lines.forEach((coords) => {
         if (coords.length < 2) return;
         ctx.beginPath();
@@ -755,7 +836,7 @@ export function drawFrame(
   };
 
   strokeRoute(frame.full, frame.showUnderlay, Math.max(1.5, w / 520), false, false);
-  strokeRoute(frame.revealed, 1, Math.max(3.4, w / 220), frame.dashed, true);
+  strokeRoute(frame.revealed, 1, Math.max(3.6, w / 210), frame.dashed, true);
 
   // 7. Stop Waypoint Nodes + Concentric Target Rings on Active Stop
   const reachedMaxIndex = frame.legIndex != null ? frame.legIndex + 1 : frame.activeStopIndex;
@@ -855,6 +936,12 @@ export function drawFrame(
     if (!xy) return;
 
     const isActive = index === frame.activeStopIndex;
+    const stopImgs = images[stop.id] ?? [];
+    const visibleThumbs = stopImgs.slice(0, 4);
+    const activePhotoIdx =
+      frame.photoStop === index && visibleThumbs.length > 1
+        ? Math.min(visibleThumbs.length - 1, Math.floor(frame.photoU * stopImgs.length))
+        : 0;
     const flag = project.style.showCountryFlags && stop.code ? flagEmoji(stop.code) : "";
     const primary = `${stop.emoji ? `${stop.emoji} ` : ""}${stop.name}`;
     const secondary = [flag, stop.country].filter(Boolean).join("  ");
@@ -869,8 +956,16 @@ export function drawFrame(
 
     const padX = Math.max(14, w / 58);
     const padY = Math.max(9, w / 92);
-    const cardW = Math.max(primaryW, secondaryW) + padX * 2;
-    const cardH = secondary ? titleFont + subFont + padY * 2.1 : titleFont + padY * 1.8;
+    const textColW = Math.max(primaryW, secondaryW);
+    const baseCardH = secondary ? titleFont + subFont + padY * 2.1 : titleFont + padY * 1.8;
+    const thumbSize = visibleThumbs.length ? Math.round(Math.max(30, baseCardH - 10)) : 0;
+    const thumbItemGap = visibleThumbs.length > 1 ? Math.max(4, Math.round(thumbSize * 0.12)) : 0;
+    const thumbsStripW = visibleThumbs.length
+      ? visibleThumbs.length * thumbSize + (visibleThumbs.length - 1) * thumbItemGap
+      : 0;
+    const thumbGap = visibleThumbs.length ? Math.round(Math.max(9, w / 96)) : 0;
+    const cardW = textColW + padX * 2 + (visibleThumbs.length ? thumbsStripW + thumbGap : 0);
+    const cardH = visibleThumbs.length ? Math.max(baseCardH, thumbSize + 10) : baseCardH;
 
     const pinOffset = Math.max(14, w / 56);
     const candidates = [
@@ -900,7 +995,7 @@ export function drawFrame(
 
     // Translucent dark charcoal glassmorphic pill card (mult.dev style)
     ctx.save();
-    ctx.fillStyle = palette.stars ? "rgba(18, 22, 30, 0.76)" : "rgba(255, 255, 255, 0.92)";
+    ctx.fillStyle = palette.stars ? "rgba(18, 22, 30, 0.82)" : "rgba(255, 255, 255, 0.94)";
     ctx.shadowColor = "rgba(0, 0, 0, 0.52)";
     ctx.shadowBlur = 16;
     ctx.shadowOffsetY = 4;
@@ -908,12 +1003,60 @@ export function drawFrame(
     ctx.fill();
     ctx.strokeStyle = palette.stars
       ? isActive
-        ? "rgba(255, 255, 255, 0.24)"
-        : "rgba(255, 255, 255, 0.12)"
+        ? "rgba(255, 255, 255, 0.28)"
+        : "rgba(255, 255, 255, 0.14)"
       : "rgba(15, 23, 42, 0.15)";
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.restore();
+
+    // Mini photo thumbnails inside stop callout card when the stop has photos (shows all up to 4 side-by-side)
+    if (visibleThumbs.length > 0) {
+      const startTx = cardX + Math.max(7, padX * 0.55);
+      const ty = cardY + (cardH - thumbSize) / 2;
+      const thumbRadius = Math.max(6, thumbSize * 0.18);
+
+      visibleThumbs.forEach((tImg, tIdx) => {
+        const tx = startTx + tIdx * (thumbSize + thumbItemGap);
+        ctx.save();
+        roundRect(ctx, tx, ty, thumbSize, thumbSize, thumbRadius);
+        ctx.clip();
+        drawCoverImage(ctx, tImg, tx, ty, thumbSize, thumbSize);
+        ctx.restore();
+
+        ctx.save();
+        roundRect(ctx, tx, ty, thumbSize, thumbSize, thumbRadius);
+        const isCurrentThumb = visibleThumbs.length > 1 && tIdx === activePhotoIdx && frame.photoStop === index;
+        ctx.strokeStyle = isCurrentThumb ? line : "rgba(255, 255, 255, 0.82)";
+        ctx.lineWidth = isCurrentThumb ? 1.8 : 1.2;
+        ctx.stroke();
+        ctx.restore();
+      });
+
+      if (stopImgs.length > visibleThumbs.length) {
+        const badgeText = `+${stopImgs.length - visibleThumbs.length}`;
+        const bf = Math.max(9, Math.round(thumbSize * 0.3));
+        const lastTx = startTx + (visibleThumbs.length - 1) * (thumbSize + thumbItemGap);
+        ctx.save();
+        ctx.font = `700 ${bf}px Inter, system-ui, sans-serif`;
+        const bw = Math.max(bf + 6, ctx.measureText(badgeText).width + 6);
+        const bh = bf + 4;
+        const bx = lastTx + thumbSize - bw + 3;
+        const by = ty - 3;
+        ctx.fillStyle = line;
+        roundRect(ctx, bx, by, bw, bh, bh / 2);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(badgeText, bx + bw / 2, by + bh / 2 + 0.5);
+        ctx.restore();
+      }
+    }
+
+    const textCenterX = visibleThumbs.length
+      ? cardX + Math.max(7, padX * 0.55) + thumbsStripW + thumbGap + textColW / 2
+      : cardX + cardW / 2;
 
     // City name (bold white sans-serif)
     ctx.save();
@@ -922,14 +1065,14 @@ export function drawFrame(
     ctx.textBaseline = "middle";
     ctx.font = `700 ${titleFont}px Inter, system-ui, sans-serif`;
     const titleY = secondary ? cardY + padY + titleFont * 0.48 : cardY + cardH / 2;
-    ctx.fillText(primary, cardX + cardW / 2, titleY);
+    ctx.fillText(primary, textCenterX, titleY);
 
     // Flag + Country subtitle
     if (secondary) {
       ctx.font = `500 ${subFont}px Inter, system-ui, sans-serif`;
       ctx.fillStyle = palette.stars ? "rgba(241, 245, 249, 0.9)" : "rgba(30, 41, 59, 0.85)";
       const subY = cardY + cardH - padY - subFont * 0.42;
-      ctx.fillText(secondary, cardX + cardW / 2, subY);
+      ctx.fillText(secondary, textCenterX, subY);
     }
     ctx.restore();
 
@@ -1009,28 +1152,143 @@ export function drawFrame(
     ctx.restore();
   }
 
-  // 10. Stop Photo Polaroid Overlay during pause
+  // 11. Stop Photo Polaroid Showcase during stop pause / arrival (all photos at the stop shown simultaneously)
   if (frame.photoStop != null) {
     const stop = project.stops[frame.photoStop];
-    const imgs = images[stop.id] ?? [];
-    const img = imgs[Math.min(imgs.length - 1, Math.floor(frame.photoU * Math.max(imgs.length, 1)))];
-    const xy = projection([stop.lon, stop.lat]);
-    if (img && xy) {
-      const pw = Math.min(w * 0.28, 360);
-      const ph = pw * 0.72;
-      const x = Math.min(w - pw - 24, Math.max(24, xy[0] + 22));
-      const y = Math.min(h - ph - 80, Math.max(70, xy[1] - ph / 2));
+    const imgs = stop ? images[stop.id] ?? [] : [];
+    const xy = stop ? projection([stop.lon, stop.lat]) : null;
+    if (stop && imgs.length > 0 && xy) {
+      const count = imgs.length;
+      const activeIdx = Math.min(count - 1, Math.floor(frame.photoU * count));
+      const isPortraitCanvas = h > w * 1.1;
+
+      const cols = count === 1 ? 1 : count <= 4 ? 2 : 3;
+      const rows = Math.ceil(count / cols);
+
+      // Size each Polaroid card so the entire multi-photo spread fits comfortably on canvas
+      const singleBaseW = isPortraitCanvas ? Math.min(w * 0.56, 360) : Math.min(w * 0.31, 390);
+      const scalePerCard = count === 1 ? 1 : count === 2 ? 0.68 : count <= 4 ? 0.58 : 0.46;
+      const pw = Math.round(Math.max(96, singleBaseW * scalePerCard));
+      const ph = Math.round(pw * 0.76);
+      const framePad = Math.max(7, Math.round(pw * 0.045));
+      const captionH = Math.max(22, Math.round(pw * 0.15));
+      const cardW = pw + framePad * 2;
+      const cardH = ph + framePad + captionH;
+      const gapX = count > 1 ? Math.max(10, Math.round(cardW * 0.07)) : 0;
+      const gapY = count > 1 ? Math.max(10, Math.round(cardH * 0.07)) : 0;
+
+      const clusterW = cols * cardW + (cols - 1) * gapX;
+      const clusterH = rows * cardH + (rows - 1) * gapY;
+
+      // Place the Polaroid showcase to the right of the stop pin if there's room, otherwise to the left
+      const offsetX = Math.max(26, Math.round(w * 0.038));
+      const preferRight = xy[0] + offsetX + clusterW < w - 16;
+      const rawX = preferRight ? xy[0] + offsetX : xy[0] - offsetX - clusterW;
+      const clusterX = Math.min(w - clusterW - 16, Math.max(16, rawX));
+      const clusterY = Math.min(h - clusterH - 64, Math.max(54, xy[1] - clusterH * 0.5));
+
+      const clusterCenterX = clusterX + clusterW / 2;
+      const clusterCenterY = clusterY + clusterH / 2;
+
+      // Dashed leader line connecting the stop pin to the Polaroid showcase
       ctx.save();
-      ctx.fillStyle = "rgba(10, 14, 24, 0.72)";
-      ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
-      ctx.shadowBlur = 18;
-      roundRect(ctx, x - 8, y - 8, pw + 16, ph + 16, 16);
-      ctx.fill();
       ctx.beginPath();
-      roundRect(ctx, x, y, pw, ph, 12);
-      ctx.clip();
-      ctx.drawImage(img, x, y, pw, ph);
+      ctx.setLineDash([4, 5]);
+      ctx.moveTo(xy[0], xy[1]);
+      ctx.lineTo(clusterCenterX, clusterCenterY);
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+      ctx.lineWidth = Math.max(1.4, w / 640);
+      ctx.stroke();
       ctx.restore();
+
+      const flag = project.style.showCountryFlags && stop.code ? `${flagEmoji(stop.code)} ` : "";
+      const baseCaptionTitle = `${flag}${stop.emoji ? `${stop.emoji} ` : ""}${stop.name}`;
+      const tilts = [-0.024, 0.022, 0.018, -0.02, -0.016, 0.02];
+
+      // Draw non-active cards first, then the active spotlighted card on top so its shadow/scale pops cleanly
+      const drawOrder = imgs
+        .map((_, idx) => idx)
+        .sort((a, b) => (a === activeIdx ? 1 : b === activeIdx ? -1 : a - b));
+
+      drawOrder.forEach((idx) => {
+        const img = imgs[idx];
+        if (!img) return;
+        const row = Math.floor(idx / cols);
+        const col = idx % cols;
+        const itemsInThisRow = row === rows - 1 ? count - row * cols : cols;
+        const rowW = itemsInThisRow * cardW + (itemsInThisRow - 1) * gapX;
+        const rowStartX = clusterX + (clusterW - rowW) / 2;
+
+        const cxCard = rowStartX + col * (cardW + gapX) + cardW / 2;
+        const cyCard = clusterY + row * (cardH + gapY) + cardH / 2;
+        const isCurrent = count > 1 && idx === activeIdx;
+        const scale = isCurrent ? 1.045 : 1;
+        const tilt = count === 1 ? -0.022 : tilts[idx % tilts.length];
+
+        ctx.save();
+        ctx.translate(cxCard, cyCard);
+        ctx.rotate(tilt);
+        ctx.scale(scale, scale);
+
+        // Crisp white Polaroid paper frame
+        ctx.fillStyle = "#f8fafc";
+        ctx.shadowColor = isCurrent ? "rgba(0, 0, 0, 0.72)" : "rgba(0, 0, 0, 0.55)";
+        ctx.shadowBlur = isCurrent ? 28 : 18;
+        ctx.shadowOffsetY = isCurrent ? 8 : 5;
+        roundRect(ctx, -cardW / 2, -cardH / 2, cardW, cardH, Math.max(9, Math.round(cardW * 0.045)));
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+        ctx.strokeStyle = isCurrent ? line : "rgba(255, 255, 255, 0.95)";
+        ctx.lineWidth = isCurrent ? 2.2 : 1.4;
+        ctx.stroke();
+
+        // Inner photo viewport (aspect-ratio-preserving cover crop)
+        const imgX = -cardW / 2 + framePad;
+        const imgY = -cardH / 2 + framePad;
+        ctx.save();
+        roundRect(ctx, imgX, imgY, pw, ph, Math.max(5, Math.round(pw * 0.035)));
+        ctx.clip();
+        drawCoverImage(ctx, img, imgX, imgY, pw, ph);
+        ctx.restore();
+
+        // Top colored map pin / tape accent on Polaroid
+        ctx.beginPath();
+        ctx.arc(0, -cardH / 2 + framePad * 0.48, Math.max(3.5, framePad * 0.42), 0, Math.PI * 2);
+        ctx.fillStyle = line;
+        ctx.fill();
+        ctx.lineWidth = 1.3;
+        ctx.strokeStyle = "#ffffff";
+        ctx.stroke();
+
+        // Bottom Polaroid Caption: Flag + Stop Name + Photo Index (e.g. "1 / 3")
+        const capY = imgY + ph + captionH / 2;
+        const capFont = Math.max(9, Math.round(captionH * 0.44));
+        ctx.font = `700 ${capFont}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = "#0f172a";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(baseCaptionTitle, imgX + 3, capY + 0.5);
+
+        if (count > 1) {
+          const counterText = `${idx + 1}/${count}`;
+          const cf = Math.max(8, Math.round(capFont * 0.84));
+          ctx.font = `700 ${cf}px Inter, system-ui, sans-serif`;
+          const cw = ctx.measureText(counterText).width + 10;
+          const ch = cf + 5;
+          const cxPill = imgX + pw - cw - 1;
+          const cyPill = capY - ch / 2;
+          ctx.fillStyle = isCurrent ? line : "rgba(15, 23, 42, 0.1)";
+          roundRect(ctx, cxPill, cyPill, cw, ch, ch / 2);
+          ctx.fill();
+          ctx.fillStyle = isCurrent ? "#ffffff" : "#334155";
+          ctx.textAlign = "center";
+          ctx.fillText(counterText, cxPill + cw / 2, capY + 0.5);
+        }
+
+        ctx.restore();
+      });
     }
   }
 

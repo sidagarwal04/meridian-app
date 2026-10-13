@@ -1,8 +1,9 @@
 "use client";
 
-import { geoGraticule, geoNaturalEarth1, geoPath, type GeoProjection } from "d3-geo";
+import { geoGraticule, geoNaturalEarth1, geoOrthographic, geoPath, type GeoProjection } from "d3-geo";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flagEmoji, greatCircle, haversineKm } from "@/lib/geo";
+import { drawShaderGlobe } from "@/lib/globeShader";
 import { drawSatelliteBiomeShading } from "@/lib/render";
 import { THEMES, transportMeta, type Leg, type Stop, type ThemeId } from "@/lib/types";
 import { loadCountries, type CountryShape } from "@/lib/world";
@@ -36,10 +37,14 @@ export function MapEditor({
   const wrapRef = useRef<HTMLDivElement>(null);
   const projectionRef = useRef<GeoProjection | null>(null);
   const [countries, setCountries] = useState<CountryShape[] | null>(null);
+  const [stopImages, setStopImages] = useState<Record<string, HTMLImageElement[]>>({});
 
-  // Camera state: zoom = 1 means full world neatly fitted; panX/panY are pixel offsets
-  const [zoom, setZoom] = useState(1.25);
+  // Camera state: projView defaults to "globe" (3D Tilted Satellite Globe like the reference video!)
+  const [projView, setProjView] = useState<"globe" | "flat">("globe");
+  const [zoom, setZoom] = useState(1.35);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [globeCenter, setGlobeCenter] = useState<{ lon: number; lat: number }>({ lon: 8, lat: 46 });
+  const sphereBoundsRef = useRef<{ cx: number; cy: number; r: number } | null>(null);
   const [clickMode, setClickMode] = useState<"add" | "pan">("add");
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [hoveredStopId, setHoveredStopId] = useState<string | null>(null);
@@ -52,7 +57,7 @@ export function MapEditor({
     [stops]
   );
 
-  // Track pointer interactions to distinguish click vs pan vs pin-drag
+  // Track pointer interactions to distinguish click vs pan/orbit vs pin-drag
   const dragRef = useRef<{
     active: boolean;
     moved: boolean;
@@ -60,6 +65,8 @@ export function MapEditor({
     startY: number;
     startPanX: number;
     startPanY: number;
+    startLon: number;
+    startLat: number;
     draggingStopIndex: number | null;
   }>({
     active: false,
@@ -68,6 +75,8 @@ export function MapEditor({
     startY: 0,
     startPanX: 0,
     startPanY: 0,
+    startLon: 8,
+    startLat: 46,
     draggingStopIndex: null,
   });
 
@@ -80,6 +89,43 @@ export function MapEditor({
       cancel = true;
     };
   }, []);
+
+  const photoSignature = useMemo(
+    () => stops.map((s) => `${s.id}:${s.photos?.length || 0}:${(s.photos ?? []).map((p) => p.slice(-20)).join(",")}`).join("|"),
+    [stops]
+  );
+
+  useEffect(() => {
+    let cancel = false;
+    const next: Record<string, HTMLImageElement[]> = {};
+    const tasks: Promise<void>[] = [];
+    stops.forEach((stop) => {
+      const photos = stop.photos ?? [];
+      if (!photos.length) return;
+      const ordered: (HTMLImageElement | null)[] = new Array(photos.length).fill(null);
+      photos.forEach((src, i) => {
+        if (!src) return;
+        tasks.push(
+          new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+              ordered[i] = img;
+              next[stop.id] = ordered.filter((x): x is HTMLImageElement => x !== null);
+              resolve();
+            };
+            img.onerror = () => resolve();
+            img.src = src;
+          })
+        );
+      });
+    });
+    Promise.all(tasks).then(() => {
+      if (!cancel) setStopImages({ ...next });
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [photoSignature, stops]);
 
   const clampPan = useCallback((x: number, y: number, z: number, width: number, height: number) => {
     const maxX = Math.max(80, (width * (z - 0.6)) / 2);
@@ -442,6 +488,54 @@ export function MapEditor({
         ctx.textBaseline = "middle";
         ctx.fillText(labelText, xy[0], pillY + pillH / 2 + 0.5);
         ctx.restore();
+
+        // Floating Mini Polaroid Thumbnails on 2D Map if stop has photos (renders all photos side-by-side)
+        const imgs = stopImages[stop.id] ?? [];
+        if (imgs.length > 0) {
+          const shownImgs = imgs.slice(0, 6);
+          const thumbW = isSelected || isHovered ? 50 : 42;
+          const thumbH = isSelected || isHovered ? 40 : 33;
+          const gap = 6;
+          const startX = xy[0] + radius + 8;
+          const ty = xy[1] - thumbH / 2;
+
+          shownImgs.forEach((img, pIdx) => {
+            const tx = startX + pIdx * (thumbW + gap);
+            ctx.save();
+            ctx.fillStyle = "#f8fafc";
+            ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
+            ctx.shadowBlur = 9;
+            ctx.beginPath();
+            ctx.roundRect(tx - 2.5, ty - 2.5, thumbW + 5, thumbH + 5, 5.5);
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.roundRect(tx, ty, thumbW, thumbH, 4);
+            ctx.clip();
+            const iw = img.naturalWidth || img.width || 1;
+            const ih = img.naturalHeight || img.height || 1;
+            const sc = Math.max(thumbW / iw, thumbH / ih);
+            const sw = thumbW / sc;
+            const sh = thumbH / sc;
+            ctx.drawImage(img, (iw - sw) / 2, (ih - sh) / 2, sw, sh, tx, ty, thumbW, thumbH);
+            ctx.restore();
+          });
+
+          if (imgs.length > shownImgs.length) {
+            const lastX = startX + (shownImgs.length - 1) * (thumbW + gap);
+            ctx.save();
+            ctx.fillStyle = "#0ea5e9";
+            ctx.beginPath();
+            ctx.roundRect(lastX + thumbW - 12, ty - 6, 20, 14, 7);
+            ctx.fill();
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "700 9.5px Inter, sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(`+${imgs.length - shownImgs.length}`, lastX + thumbW - 2, ty + 1);
+            ctx.restore();
+          }
+        }
       });
     };
 
@@ -449,7 +543,7 @@ export function MapEditor({
     const observer = new ResizeObserver(paint);
     observer.observe(wrap);
     return () => observer.disconnect();
-  }, [countries, stops, validStops, legs, theme, color, zoom, pan, selectedStopId, hoveredStopId, clampPan]);
+  }, [countries, stops, validStops, legs, theme, color, zoom, pan, selectedStopId, hoveredStopId, stopImages, clampPan]);
 
   const selectedIndex = useMemo(
     () => (selectedStopId ? stops.findIndex((s) => s.id === selectedStopId) : -1),
@@ -676,6 +770,14 @@ export function MapEditor({
               ×
             </button>
           </div>
+          {selectedStop.photos && selectedStop.photos.length > 0 ? (
+            <div className="map-pin-popover-photos">
+              {selectedStop.photos.map((src, pIdx) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={src.slice(-24) + pIdx} src={src} alt={`${selectedStop.name} photo ${pIdx + 1}`} />
+              ))}
+            </div>
+          ) : null}
           <div className="map-pin-popover-actions">
             {onMove ? (
               <>
@@ -753,6 +855,12 @@ export function MapEditor({
                     title="Click to inspect or drag to reorder"
                   >
                     <span className="chip-num">{index + 1}</span>
+                    {stop.photos && stop.photos.length > 0
+                      ? stop.photos.map((photoSrc, pIdx) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img key={photoSrc.slice(-20) + pIdx} src={photoSrc} alt="" className="chip-photo-thumb" />
+                        ))
+                      : null}
                     <span className="chip-name">
                       {stop.code ? `${flagEmoji(stop.code)} ` : ""}
                       {stop.name}

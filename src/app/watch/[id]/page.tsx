@@ -28,7 +28,7 @@ export default function Page() {
         {project ? (
           <>
             <h1>{project.title}</h1>
-            <GlobeStage project={project} play="auto" pro={project.style.resolution === "1080"} />
+            <GlobeStage project={project} play="auto" enableAudio pro={project.style.resolution === "1080"} />
             <p className="center">
               <Link className="btn ghost" href={`/studio/${project.id}`}>
                 Edit

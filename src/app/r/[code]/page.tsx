@@ -16,7 +16,7 @@ export default function Page() {
         {project ? (
           <>
             <h1>{project.title}</h1>
-            <GlobeStage project={project} play="auto" pro={false} />
+            <GlobeStage project={project} play="auto" enableAudio pro={false} />
             <p className="center">
               <Link className="pill" href="/login?next=/videos">
                 Create your own

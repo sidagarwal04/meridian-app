@@ -12,7 +12,7 @@ export function encodeRoute(project: Project) {
     t: project.title,
     s: project.stops.map((stop) => [stop.name, stop.country, stop.code, +stop.lat.toFixed(4), +stop.lon.toFixed(4), stop.emoji]),
     l: project.legs.map((leg) => leg.transport),
-    y: { ...project.style, music: "none" },
+    y: { ...project.style },
   };
   const bytes = new TextEncoder().encode(JSON.stringify(data));
   let binary = "";
@@ -39,7 +39,7 @@ export function decodeRoute(code: string): Project | null {
       updatedAt: Date.now(),
       stops,
       legs: stops.slice(1).map((_, index) => ({ transport: data.l?.[index] || "plane" })),
-      style: { ...defaultStyle(), ...data.y, music: "none" },
+      style: { ...defaultStyle(), ...data.y, music: data.y?.music || "ambient" },
     };
   } catch {
     return null;

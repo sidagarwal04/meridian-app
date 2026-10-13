@@ -7,7 +7,7 @@ import { searchCities } from "@/lib/cities";
 import { flagEmoji, haversineKm, nearestCity } from "@/lib/geo";
 import { parseGeoJson, parseGpx, parseItinerary, parseKml, placesFromGoogleUrl, simplifyTrack } from "@/lib/parse";
 import { encodeRoute } from "@/lib/share";
-import { playTransportPreview } from "@/lib/music";
+import { TRACKS, playMusicPreview, playTransportPreview, unlockAudio } from "@/lib/music";
 import { getProject, saveProject } from "@/lib/storage";
 import { TEMPLATES } from "@/lib/templates";
 import {
@@ -53,9 +53,17 @@ function sanitizeProject(project: Project): Project {
       Number.isFinite(s.lon) &&
       Math.abs(s.lat) <= 85.5 &&
       Math.abs(s.lon) <= 180
-  );
+  ).map((s) => ({
+    ...s,
+    photos: Array.isArray(s.photos) ? s.photos.filter(Boolean) : [],
+  }));
   const stops = validStops.length > 0 ? validStops : starterStops();
   const legs = normalizeLegs(stops, project.legs ?? []);
+  const rawMusic = project.style?.music;
+  const music =
+    !rawMusic || (rawMusic === "none" && !project.style?.musicChosen)
+      ? "ambient"
+      : rawMusic;
   return {
     ...project,
     stops,
@@ -63,6 +71,7 @@ function sanitizeProject(project: Project): Project {
     style: {
       ...defaultStyle(),
       ...project.style,
+      music,
       soundEffects: project.style?.soundEffects ?? true,
     },
   };
@@ -89,8 +98,12 @@ export function Studio() {
   const [showImports, setShowImports] = useState(false);
   const [copied, setCopied] = useState(false);
   const [previewingSfx, setPreviewingSfx] = useState<Transport | null>(null);
+  const [previewingMusic, setPreviewingMusic] = useState<Project["style"]["music"] | null>(null);
   const [stageAudio, setStageAudio] = useState(true);
+  const [previewAudio, setPreviewAudio] = useState(true);
   const sfxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const musicTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const musicStopRef = useRef<(() => void) | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const globe = useRef<GlobeHandle>(null);
   const inlineGlobe = useRef<GlobeHandle>(null);
@@ -313,11 +326,38 @@ export function Studio() {
   };
 
   const auditionTransport = (transport: Transport, durationSec = 1.6) => {
+    setPreviewingMusic(null);
+    if (musicTimer.current) clearTimeout(musicTimer.current);
     setPreviewingSfx(transport);
     if (sfxTimer.current) clearTimeout(sfxTimer.current);
     playTransportPreview(transport, durationSec);
     sfxTimer.current = setTimeout(() => {
       setPreviewingSfx((curr) => (curr === transport ? null : curr));
+    }, durationSec * 1000);
+  };
+
+  const auditionMusic = (musicId: Project["style"]["music"], durationSec = 4.5) => {
+    setPreviewingSfx(null);
+    if (sfxTimer.current) clearTimeout(sfxTimer.current);
+    if (musicTimer.current) clearTimeout(musicTimer.current);
+    if (previewingMusic === musicId) {
+      musicStopRef.current?.();
+      musicStopRef.current = null;
+      setPreviewingMusic(null);
+      return;
+    }
+    if (musicId === "none") {
+      musicStopRef.current?.();
+      musicStopRef.current = null;
+      setPreviewingMusic(null);
+      return;
+    }
+    setPreviewingMusic(musicId);
+    playMusicPreview(musicId, durationSec).then((stopFn) => {
+      musicStopRef.current = stopFn;
+    });
+    musicTimer.current = setTimeout(() => {
+      setPreviewingMusic((curr) => (curr === musicId ? null : curr));
     }, durationSec * 1000);
   };
 
@@ -447,20 +487,25 @@ export function Studio() {
     await importText(text, kind);
   };
 
-  const addPhotos = async (index: number, files: FileList) => {
+  const addPhotos = async (index: number, files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (!fileArray.length) return;
     const room = limits.maxPhotos - photoCount;
     if (room <= 0) {
       setLock(`Photo limit reached (${limits.maxPhotos}).`);
       return;
     }
-    const chosen = [...files].slice(0, room);
-    const encoded = await Promise.all(chosen.map(compress));
+    const chosen = fileArray.slice(0, room);
+    const encoded = (await Promise.all(chosen.map(compress))).filter(Boolean);
+    if (!encoded.length) return;
     update((current) => ({
       ...current,
       stops: current.stops.map((stop, stopIndex) =>
-        stopIndex === index ? { ...stop, photos: [...stop.photos, ...encoded].slice(0, 4) } : stop
+        stopIndex === index ? { ...stop, photos: [...(stop.photos ?? []), ...encoded].slice(0, 12) } : stop
       ),
     }));
+    const stopName = project.stops[index]?.name || "stop";
+    setNotice(`Added ${encoded.length} ${encoded.length === 1 ? "photo" : "photos"} to ${stopName}.`);
   };
 
   const share = async () => {
@@ -529,7 +574,10 @@ export function Studio() {
           <button
             type="button"
             className={stageMode === "globe" ? "active" : ""}
-            onClick={() => setStageMode("globe")}
+            onClick={() => {
+              unlockAudio();
+              setStageMode("globe");
+            }}
           >
             🌍 3D Globe Live
           </button>
@@ -546,10 +594,22 @@ export function Studio() {
           >
             {copied ? "✓ Copied to clipboard" : "Share"}
           </button>
-          <button className="btn ghost sm" onClick={() => setPreview(true)}>
+          <button
+            className="btn ghost sm"
+            onClick={() => {
+              unlockAudio();
+              setPreview(true);
+            }}
+          >
             ▶ Preview
           </button>
-          <button className="btn primary sm" onClick={() => setPreview(true)}>
+          <button
+            className="btn primary sm"
+            onClick={() => {
+              unlockAudio();
+              setPreview(true);
+            }}
+          >
             Export Video
           </button>
           <Link href="/videos" className="btn ghost sm">
@@ -739,6 +799,23 @@ export function Studio() {
                           </small>
                         </div>
                         <div className="row-actions">
+                          <label
+                            className="action-btn photo-quick-btn"
+                            title={`Add photos for ${stop.name}`}
+                            aria-label={`Add photos for ${stop.name}`}
+                          >
+                            📷
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              onChange={(event) => {
+                                const selected = event.target.files ? Array.from(event.target.files) : [];
+                                event.target.value = "";
+                                if (selected.length) addPhotos(index, selected);
+                              }}
+                            />
+                          </label>
                           <button
                             type="button"
                             className="action-btn"
@@ -770,6 +847,33 @@ export function Studio() {
                           </button>
                         </div>
                       </div>
+
+                      {stop.photos && stop.photos.length > 0 ? (
+                        <div className="stop-inline-photos">
+                          {stop.photos.map((src, photoIndex) => (
+                            <figure key={src.slice(-24) + photoIndex} className="stop-inline-thumb">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={src} alt={`${stop.name} photo ${photoIndex + 1}`} />
+                              <button
+                                type="button"
+                                aria-label="Remove photo"
+                                onClick={() =>
+                                  update((current) => ({
+                                    ...current,
+                                    stops: current.stops.map((item, itemIndex) =>
+                                      itemIndex === index
+                                        ? { ...item, photos: item.photos.filter((_, candidate) => candidate !== photoIndex) }
+                                        : item
+                                    ),
+                                  }))
+                                }
+                              >
+                                ×
+                              </button>
+                            </figure>
+                          ))}
+                        </div>
+                      ) : null}
 
                       {project.legs[index] ? (
                         <div className="leg-connector">
@@ -975,7 +1079,7 @@ export function Studio() {
                   {stop.photos.length > 0 ? (
                     <div className="thumbs">
                       {stop.photos.map((src, photoIndex) => (
-                        <figure key={src.slice(0, 32) + photoIndex}>
+                        <figure key={src.slice(-24) + photoIndex}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={src} alt="" />
                           <button
@@ -1005,8 +1109,9 @@ export function Studio() {
                       accept="image/*"
                       multiple
                       onChange={(event) => {
-                        if (event.target.files) addPhotos(index, event.target.files);
+                        const selected = event.target.files ? Array.from(event.target.files) : [];
                         event.target.value = "";
+                        if (selected.length) addPhotos(index, selected);
                       }}
                     />
                   </label>
@@ -1291,39 +1396,68 @@ export function Studio() {
               <div className="side-divider" />
 
               <div className="option-group">
-                <span className="field-label">Background Soundtrack</span>
+                <div className="sfx-header-row">
+                  <span className="field-label">Background Soundtrack</span>
+                  <span className="sfx-sub-hint">Upbeat beats &amp; melodies</span>
+                </div>
                 <p className="hint" style={{ marginBottom: 8 }}>
-                  Synthesized ambient soundtracks are mixed underneath your transport sound effects during video export.
+                  Fun, beat-driven travel grooves with drums, basslines, and synth/marimba hooks mixed right into your preview and exported video.
                 </p>
                 {!limits.music ? <p className="notice">Music is a Pro feature. Free exports stay silent.</p> : null}
                 <div className="music-list">
-                  {[
-                    ["none", "🔇 No background music", "Only transport sound effects (or silent if SFX off)"],
-                    ["ambient", "🌌 Ambient Drift", "Warm atmospheric pads"],
-                    ["synthwave", "🌆 Synthwave Pulse", "Retro driving arpeggio"],
-                    ["cinematic", "🎻 Cinematic Horizon", "Deep orchestral swells"],
-                    ["folk", "🪕 Acoustic Trail", "Light plucked melody"],
-                  ].map(([id, label, desc]) => (
-                    <label key={id} className={`music-card ${project.style.music === id ? "on" : ""}`}>
-                      <input
-                        type="radio"
-                        name="music"
-                        checked={project.style.music === id}
-                        onChange={() => {
-                          if (id !== "none" && !limits.music) return setLock("Music is included with Pro.");
-                          update((current) => ({ ...current, style: { ...current.style, music: id as Project["style"]["music"] } }));
-                        }}
-                      />
-                      <div>
-                        <strong>{label}</strong>
-                        <small>{desc}</small>
+                  {TRACKS.map((track) => {
+                    const isSelected = project.style.music === track.id;
+                    const isTesting = previewingMusic === track.id;
+                    return (
+                      <div key={track.id} className={`music-card ${isSelected ? "on" : ""} ${isTesting ? "playing" : ""}`}>
+                        <label className="music-card-main">
+                          <input
+                            type="radio"
+                            name="music"
+                            checked={isSelected}
+                            onChange={() => {
+                              if (track.id !== "none" && !limits.music) return setLock("Music is included with Pro.");
+                              update((current) => ({
+                                ...current,
+                                style: { ...current.style, music: track.id, musicChosen: true },
+                              }));
+                              auditionMusic(track.id, 4.5);
+                            }}
+                          />
+                          <span className="sfx-icon" aria-hidden="true">
+                            {track.icon}
+                          </span>
+                          <div className="music-card-copy">
+                            <strong>
+                              <span>{track.label}</span>
+                              <em className="music-bpm-pill">{track.bpm}</em>
+                            </strong>
+                            <small>{track.blurb}</small>
+                          </div>
+                        </label>
+                        {track.id !== "none" ? (
+                          <button
+                            type="button"
+                            className={`sfx-play-badge music-test-btn ${isTesting ? "active" : ""}`}
+                            onClick={() => auditionMusic(track.id, 5.0)}
+                          >
+                            {isTesting ? "⏹ Stop" : "▶ Sample"}
+                          </button>
+                        ) : null}
                       </div>
-                    </label>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
           ) : null}
+
+          <div className="studio-side-footer">
+            Made with <span className="footer-heart" aria-label="love">♥</span> for travel enthusiasts by{" "}
+            <a href="https://meetsid.dev" target="_blank" rel="noopener noreferrer">
+              Sid
+            </a>
+          </div>
         </aside>
 
         <div className="studio-map">
@@ -1389,12 +1523,30 @@ export function Studio() {
               project={project}
               pro={limits.pro}
               play="auto"
-              enableAudio
+              enableAudio={previewAudio}
               onTime={(time, total) => setProgress(total ? time / total : 0)}
             />
             <div className="modal-actions">
-              <button className="btn ghost" onClick={() => globe.current?.play()} disabled={exporting}>
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  unlockAudio();
+                  globe.current?.play();
+                }}
+                disabled={exporting}
+              >
                 ↻ Replay
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  unlockAudio();
+                  setPreviewAudio((v) => !v);
+                }}
+                disabled={exporting}
+              >
+                {previewAudio ? "🔊 Sound On" : "🔇 Muted"}
               </button>
               <button className={`btn ghost${copied ? " copied" : ""}`} onClick={share}>
                 {copied ? "✓ Copied to clipboard" : "🔗 Copy share link"}
@@ -1432,14 +1584,41 @@ function slugify(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "meridian";
 }
 
-async function compress(file: File) {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 960 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return "";
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", 0.72);
+async function compress(file: File): Promise<string> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 960 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.78);
+    }
+  } catch {
+    /* fall through to FileReader + Image fallback */
+  }
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      if (!dataUrl) return resolve("");
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 960 / Math.max(img.width || 1, img.height || 1));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round((img.width || 640) * scale));
+        canvas.height = Math.max(1, Math.round((img.height || 480) * scale));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return resolve(dataUrl);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.78));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    };
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
 }

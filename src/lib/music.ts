@@ -1,19 +1,78 @@
 import type { MusicId, Transport } from "./types";
 
-export const TRACKS: { id: MusicId; label: string; blurb: string }[] = [
-  { id: "none", label: "No music", blurb: "Silent background" },
-  { id: "ambient", label: "Ambient", blurb: "Slow pads for a wide route" },
-  { id: "synthwave", label: "Synthwave", blurb: "Pulse for a fast city hop" },
-  { id: "cinematic", label: "Cinematic", blurb: "Low fifths for a long journey" },
-  { id: "folk", label: "Folk", blurb: "Soft plucks for a slow trip" },
+export const TRACKS: { id: MusicId; label: string; icon: string; bpm: string; blurb: string }[] = [
+  {
+    id: "ambient",
+    label: "Sunlit Horizon (Default)",
+    icon: "☀️",
+    bpm: "118 BPM",
+    blurb: "Upbeat indie-pop travel groove with punchy drums, warm bass & bright synth plucks",
+  },
+  {
+    id: "tropical",
+    label: "Tropical Island Hop",
+    icon: "🏝️",
+    bpm: "116 BPM",
+    blurb: "Bouncy marimba & steel-drum island melody with a sunny four-on-the-floor beat",
+  },
+  {
+    id: "funk",
+    label: "Disco Funk Strut",
+    icon: "🕺",
+    bpm: "120 BPM",
+    blurb: "Groovy slap-bassline, crisp handclaps & brassy funk stabs for high-energy reels",
+  },
+  {
+    id: "synthwave",
+    label: "Turbo Neon Rush",
+    icon: "🏎️",
+    bpm: "126 BPM",
+    blurb: "Driving 80s synthwave arpeggios, gated snare & pumping octave bass",
+  },
+  {
+    id: "arcade",
+    label: "8-Bit World Tour",
+    icon: "🕹️",
+    bpm: "136 BPM",
+    blurb: "Hyper-fun retro video-game chiptune lead with fast arcade coins & drums",
+  },
+  {
+    id: "folk",
+    label: "Whistling Roadtrip",
+    icon: "🚐",
+    bpm: "114 BPM",
+    blurb: "Feel-good acoustic strum, upbeat tambourine & a catchy whistled hook",
+  },
+  {
+    id: "lofi",
+    label: "Passport Stamp Groove",
+    icon: "🧋",
+    bpm: "94 BPM",
+    blurb: "Bouncy hip-hop boom-bap beat, warm Rhodes keys & jazzy vlog melody",
+  },
+  {
+    id: "cinematic",
+    label: "Odyssey Blockbuster",
+    icon: "🥁",
+    bpm: "112 BPM",
+    blurb: "Epic stadium adventure drums, heroic brass anthem & soaring strings",
+  },
+  {
+    id: "none",
+    label: "No background music",
+    icon: "🔇",
+    bpm: "SFX Only",
+    blurb: "Only transport sound effects (or silent export if SFX is turned off)",
+  },
 ];
 
 type Handle = { stop: () => void; dest: MediaStreamAudioDestinationNode };
 
 export type AudioSession = {
   dest: MediaStreamAudioDestinationNode;
+  triggerIntro: (durationSec?: number) => void;
   triggerLeg: (transport: Transport, durationSec?: number) => void;
-  triggerArrival: () => void;
+  triggerArrival: (hasPhotos?: boolean) => void;
   stopLeg: () => void;
   stop: () => void;
 };
@@ -22,10 +81,37 @@ let shared: AudioContext | null = null;
 let noiseBufferCache: AudioBuffer | null = null;
 let pinkNoiseBufferCache: AudioBuffer | null = null;
 let activePreviewStop: (() => void) | null = null;
+let unlockBound = false;
 
 function ctx() {
   if (!shared) shared = new AudioContext();
+  if (!unlockBound && typeof window !== "undefined") {
+    unlockBound = true;
+    const resumeOnGesture = () => {
+      if (shared && shared.state === "suspended") {
+        shared.resume().catch(() => {});
+      }
+    };
+    window.addEventListener("pointerdown", resumeOnGesture, { passive: true });
+    window.addEventListener("keydown", resumeOnGesture, { passive: true });
+  }
   return shared;
+}
+
+/**
+ * Call synchronously inside user click handlers (Preview, Export, 3D Globe, etc.)
+ * so browser autoplay policies unlock the shared AudioContext immediately.
+ */
+export function unlockAudio() {
+  if (typeof window === "undefined") return;
+  try {
+    const audio = ctx();
+    if (audio.state === "suspended") {
+      audio.resume().catch(() => {});
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 function getWhiteNoiseBuffer(audio: AudioContext): AudioBuffer {
@@ -630,9 +716,10 @@ export function playTransportSoundOnNode(
 }
 
 /**
- * Subtle cartographic arrival chime when reaching a waypoint stop.
+ * Subtle cartographic arrival chime when reaching a waypoint stop,
+ * plus a crisp polaroid camera shutter click if the stop has photos.
  */
-export function playArrivalChimeOnNode(audio: AudioContext, target: AudioNode) {
+export function playArrivalChimeOnNode(audio: AudioContext, target: AudioNode, hasPhotos = false) {
   const now = audio.currentTime;
   [587.33, 880].forEach((freq, idx) => {
     const start = now + idx * 0.055;
@@ -641,13 +728,35 @@ export function playArrivalChimeOnNode(audio: AudioContext, target: AudioNode) {
     osc.type = "sine";
     osc.frequency.setValueAtTime(freq, start);
     g.gain.setValueAtTime(0.0005, start);
-    g.gain.linearRampToValueAtTime(0.032, start + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0004, start + 0.32);
+    g.gain.linearRampToValueAtTime(0.042, start + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0004, start + 0.36);
     osc.connect(g);
     g.connect(target);
     osc.start(start);
-    osc.stop(start + 0.34);
+    osc.stop(start + 0.38);
   });
+
+  if (hasPhotos) {
+    // Polaroid camera shutter double-click ("kachik!")
+    [0.14, 0.20].forEach((offset, idx) => {
+      const tClick = now + offset;
+      const src = audio.createBufferSource();
+      src.buffer = getWhiteNoiseBuffer(audio);
+      const bp = audio.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.Q.value = 3.2;
+      bp.frequency.value = idx === 0 ? 2400 : 1650;
+      const g = audio.createGain();
+      g.gain.setValueAtTime(0.001, tClick);
+      g.gain.linearRampToValueAtTime(idx === 0 ? 0.16 : 0.11, tClick + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0008, tClick + 0.032);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(target);
+      src.start(tClick);
+      src.stop(tClick + 0.038);
+    });
+  }
 }
 
 /**
@@ -669,11 +778,452 @@ export async function playTransportPreview(transport: Transport, durationSec = 1
   }
 }
 
+/**
+ * Audition a background soundtrack briefly when selecting it in the Audio tab.
+ */
+export async function playMusicPreview(id: MusicId, durationSec = 4.2): Promise<() => void> {
+  try {
+    if (activePreviewStop) {
+      activePreviewStop();
+      activePreviewStop = null;
+    }
+    if (id === "none") return () => {};
+    const session = await createAudioSession({ music: id, soundEffects: false });
+    if (!session) return () => {};
+    const timer = window.setTimeout(() => {
+      session.stop();
+    }, durationSec * 1000);
+    const stopFn = () => {
+      window.clearTimeout(timer);
+      session.stop();
+    };
+    activePreviewStop = stopFn;
+    return stopFn;
+  } catch {
+    return () => {};
+  }
+}
+
 export async function startMusic(id: MusicId): Promise<Handle | null> {
   if (id === "none") return null;
   const session = await createAudioSession({ music: id, soundEffects: false });
   if (!session) return null;
   return { dest: session.dest, stop: session.stop };
+}
+
+function midiToFreq(midi: number): number {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+/**
+ * Starts a lively, beat-driven procedural groove for the given MusicId.
+ * Uses a 16th-note drum & synth sequencer with kick, snare/clap, hi-hats,
+ * groovy bassline, chords, and catchy lead hooks.
+ */
+function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): { stop: () => void } {
+  const musicBus = audio.createGain();
+  musicBus.gain.setValueAtTime(0.001, audio.currentTime);
+  musicBus.gain.linearRampToValueAtTime(0.82, audio.currentTime + 0.12);
+  musicBus.connect(dest);
+
+  const playKick = (vol = 0.24, punch = 155, endFreq = 44, dur = 0.18) => {
+    const t = audio.currentTime;
+    const osc = audio.createOscillator();
+    const g = audio.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(punch, t);
+    osc.frequency.exponentialRampToValueAtTime(endFreq, t + dur);
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur + 0.02);
+    osc.connect(g);
+    g.connect(musicBus);
+    osc.start(t);
+    osc.stop(t + dur + 0.03);
+  };
+
+  const playSnare = (vol = 0.13, toneHz = 185, decay = 0.13, clap = false) => {
+    const t = audio.currentTime;
+    const noise = audio.createBufferSource();
+    noise.buffer = getWhiteNoiseBuffer(audio);
+    const filter = audio.createBiquadFilter();
+    filter.type = clap ? "bandpass" : "highpass";
+    filter.frequency.value = clap ? 1350 : 950;
+    if (clap) filter.Q.value = 1.8;
+
+    const ng = audio.createGain();
+    ng.gain.setValueAtTime(vol, t);
+    ng.gain.exponentialRampToValueAtTime(0.0008, t + decay);
+    noise.connect(filter);
+    filter.connect(ng);
+    ng.connect(musicBus);
+    noise.start(t);
+    noise.stop(t + decay + 0.02);
+
+    if (!clap) {
+      const body = audio.createOscillator();
+      const bg = audio.createGain();
+      body.type = "triangle";
+      body.frequency.setValueAtTime(toneHz, t);
+      body.frequency.exponentialRampToValueAtTime(85, t + 0.08);
+      bg.gain.setValueAtTime(vol * 0.65, t);
+      bg.gain.exponentialRampToValueAtTime(0.0008, t + 0.09);
+      body.connect(bg);
+      bg.connect(musicBus);
+      body.start(t);
+      body.stop(t + 0.1);
+    }
+  };
+
+  const playHat = (vol = 0.045, open = false) => {
+    const t = audio.currentTime;
+    const dur = open ? 0.17 : 0.042;
+    const src = audio.createBufferSource();
+    src.buffer = getWhiteNoiseBuffer(audio);
+    const hp = audio.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 6800;
+    const g = audio.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+    src.connect(hp);
+    hp.connect(g);
+    g.connect(musicBus);
+    src.start(t);
+    src.stop(t + dur + 0.01);
+  };
+
+  const playNote = (
+    midi: number,
+    type: OscillatorType,
+    vol: number,
+    dur: number,
+    cutoff = 2400,
+    detuneCents = 0
+  ) => {
+    if (midi <= 0) return;
+    const t = audio.currentTime;
+    const freq = midiToFreq(midi);
+    const osc = audio.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (detuneCents) osc.detune.setValueAtTime(detuneCents, t);
+
+    const filter = audio.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(cutoff, t);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(240, cutoff * 0.38), t + dur);
+
+    const g = audio.createGain();
+    g.gain.setValueAtTime(0.0008, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0006, t + dur);
+
+    osc.connect(filter);
+    filter.connect(g);
+    g.connect(musicBus);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  };
+
+  const playChord = (midis: number[], type: OscillatorType, vol: number, dur: number, cutoff = 1800) => {
+    midis.forEach((m, i) => playNote(m, type, vol, dur, cutoff, (i - 1) * 5));
+  };
+
+  let bpm = 118;
+  let tickStep = (_s: number) => {};
+
+  if (id === "ambient") {
+    // "Sunlit Horizon" — Upbeat Indie-Pop Travel Groove (C - G - Am - F, 118 BPM)
+    bpm = 118;
+    const bassRoots = [36, 43, 45, 41]; // C2, G2, A2, F2
+    const chords = [
+      [60, 64, 67], // C
+      [59, 62, 67], // G
+      [60, 64, 69], // Am
+      [60, 65, 69], // F
+    ];
+    // Catchy bright kalimba/synth hook across 64 16th-steps
+    const leadPattern = [
+      72, 0, 76, 0, 79, 0, 76, 72, 74, 0, 79, 0, 83, 0, 79, 0,
+      76, 0, 79, 0, 81, 0, 79, 76, 77, 0, 76, 72, 74, 0, 67, 0,
+    ];
+    tickStep = (step) => {
+      const bar = Math.floor(step / 16) % 4;
+      const s = step % 16;
+      const root = bassRoots[bar];
+
+      // Four-on-the-floor kick + bouncy syncopated ghost kick
+      if (s % 4 === 0 || s === 14) playKick(0.22, 150, 46, 0.16);
+      if (s === 4 || s === 12) playSnare(0.12, 190, 0.12, true);
+      if (s % 2 === 0) playHat(s % 4 === 2 ? 0.055 : 0.03, s % 4 === 2);
+
+      // Driving pop bassline
+      if (s === 0 || s === 3 || s === 6 || s === 8 || s === 10 || s === 14) {
+        const oct = s === 6 || s === 14 ? 12 : 0;
+        playNote(root + oct, "sawtooth", 0.085, 0.16, 680);
+      }
+
+      // Off-beat sunny chord stabs
+      if (s === 2 || s === 6 || s === 10 || s === 14) {
+        playChord(chords[bar], "triangle", 0.032, 0.18, 2200);
+      }
+
+      // Plucky lead melody
+      const note = leadPattern[step % 32];
+      if (note > 0) {
+        playNote(note, "triangle", 0.065, 0.2, 3400);
+        playNote(note + 12, "sine", 0.025, 0.14, 4200);
+      }
+    };
+  } else if (id === "tropical") {
+    // "Tropical Island Hop" — Bouncy Marimba & Steel-Drum Sunset House (F - Dm - Bb - C, 116 BPM)
+    bpm = 116;
+    const bassRoots = [41, 38, 46, 48];
+    const marimbaSeq = [
+      65, 69, 72, 69, 77, 0, 72, 69, 62, 65, 69, 65, 74, 0, 69, 65,
+      70, 74, 77, 74, 81, 0, 77, 74, 72, 76, 79, 76, 84, 79, 76, 72,
+    ];
+    tickStep = (step) => {
+      const bar = Math.floor(step / 16) % 4;
+      const s = step % 16;
+
+      if (s % 4 === 0) playKick(0.21, 140, 45, 0.17);
+      // Dembow / tropical rim-clap on 3, 6, 11, 14 & backbeat
+      if (s === 4 || s === 12) playSnare(0.1, 220, 0.1, true);
+      if (s === 3 || s === 6 || s === 11 || s === 14) playHat(0.05, true);
+      else if (s % 2 === 1) playHat(0.028, false);
+
+      // Warm sub-bass bounce
+      if (s === 0 || s === 3 || s === 7 || s === 10 || s === 14) {
+        playNote(bassRoots[bar], "triangle", 0.11, 0.2, 520);
+      }
+
+      // Steel-drum / Marimba lead (fundamental + 4th harmonic overtone)
+      const mNote = marimbaSeq[step % 32];
+      if (mNote > 0) {
+        playNote(mNote, "sine", 0.075, 0.16, 3600);
+        playNote(mNote + 19, "triangle", 0.026, 0.08, 4000);
+      }
+    };
+  } else if (id === "funk") {
+    // "Disco Funk Strut" — Groovy Slap Bass, Claps & Brassy Stabs (Em7 - A7 - Dmaj7 - B7, 120 BPM)
+    bpm = 120;
+    const bassLine = [
+      40, 0, 52, 40, 0, 43, 45, 47, 45, 0, 57, 45, 0, 49, 52, 54,
+      38, 0, 50, 38, 0, 42, 45, 47, 47, 0, 59, 47, 54, 51, 47, 42,
+    ];
+    const brassChords = [
+      [64, 67, 71, 74],
+      [64, 69, 73, 76],
+      [62, 66, 69, 73],
+      [63, 66, 69, 75],
+    ];
+    tickStep = (step) => {
+      const bar = Math.floor(step / 16) % 4;
+      const s = step % 16;
+
+      if (s % 4 === 0) playKick(0.24, 160, 44, 0.16);
+      if (s === 4 || s === 12) playSnare(0.14, 200, 0.13, true);
+      // Disco open hi-hat on the "&" of every beat
+      if (s % 4 === 2) playHat(0.065, true);
+      else playHat(0.025, false);
+
+      // Funky octave slap-bass
+      const bNote = bassLine[step % 32];
+      if (bNote > 0) {
+        playNote(bNote, "sawtooth", 0.095, 0.13, 1450);
+      }
+
+      // Syncopated brassy synth stabs
+      if (s === 0 || s === 3 || s === 6 || s === 11 || s === 14) {
+        playChord(brassChords[bar], "sawtooth", 0.028, 0.14, 2600);
+      }
+    };
+  } else if (id === "synthwave") {
+    // "Turbo Neon Rush" — Fast 80s Outrun Arpeggio & Pumping Bass (Am - F - C - G, 126 BPM)
+    bpm = 126;
+    const roots = [33, 29, 36, 31];
+    const arpNotes = [
+      [69, 72, 76, 81, 76, 72, 69, 76],
+      [65, 69, 72, 77, 72, 69, 65, 72],
+      [67, 72, 76, 79, 76, 72, 67, 76],
+      [67, 71, 74, 79, 74, 71, 67, 74],
+    ];
+    tickStep = (step) => {
+      const bar = Math.floor(step / 16) % 4;
+      const s = step % 16;
+
+      if (s % 4 === 0) playKick(0.25, 165, 42, 0.17);
+      if (s === 4 || s === 12) playSnare(0.15, 175, 0.18, false);
+      if (s % 2 === 0) playHat(0.04, s % 4 === 2);
+
+      // Rolling 16th-note octave synth bass
+      const bassNote = roots[bar] + (s % 2 === 1 ? 12 : 0);
+      playNote(bassNote, "sawtooth", 0.08, 0.11, 920);
+
+      // Sparkling 16th-note neon arpeggio
+      const arp = arpNotes[bar][s % 8];
+      playNote(arp, "square", 0.036, 0.12, 2900, 6);
+    };
+  } else if (id === "arcade") {
+    // "8-Bit World Tour" — Hyper-Fun Chiptune Adventure Lead (C - G - Am - F, 136 BPM)
+    bpm = 136;
+    const bassRoots = [36, 43, 45, 41];
+    const chipLead = [
+      72, 76, 79, 84, 79, 76, 72, 0, 74, 79, 83, 86, 83, 79, 74, 0,
+      76, 81, 84, 88, 84, 81, 76, 0, 77, 81, 84, 89, 88, 84, 79, 76,
+    ];
+    tickStep = (step) => {
+      const bar = Math.floor(step / 16) % 4;
+      const s = step % 16;
+
+      if (s % 4 === 0 || s === 10) playKick(0.2, 180, 52, 0.12);
+      if (s === 4 || s === 12) playSnare(0.11, 240, 0.09, false);
+      if (s % 2 === 0) playHat(0.035, false);
+
+      // Jumping octave triangle bass
+      const bPitch = bassRoots[bar] + (s % 4 >= 2 ? 12 : 0);
+      if (s % 2 === 0) playNote(bPitch, "triangle", 0.1, 0.1, 1600);
+
+      // Square-wave chiptune melody
+      const cNote = chipLead[step % 32];
+      if (cNote > 0) {
+        playNote(cNote, "square", 0.045, 0.1, 3800);
+      }
+    };
+  } else if (id === "folk") {
+    // "Whistling Roadtrip" — Feel-Good Acoustic Strum, Tambourine & Whistled Hook (G - C - Em - D, 114 BPM)
+    bpm = 114;
+    const roots = [43, 48, 40, 38];
+    const strumChords = [
+      [55, 59, 62, 67],
+      [60, 64, 67, 72],
+      [55, 59, 64, 67],
+      [57, 62, 66, 69],
+    ];
+    const whistleMelody = [
+      79, 0, 81, 83, 79, 0, 74, 0, 76, 0, 79, 76, 72, 0, 0, 0,
+      79, 0, 81, 83, 86, 0, 83, 79, 81, 0, 78, 74, 79, 0, 0, 0,
+    ];
+    tickStep = (step) => {
+      const bar = Math.floor(step / 16) % 4;
+      const s = step % 16;
+
+      // Stomp-clap roadtrip rhythm
+      if (s === 0 || s === 8) playKick(0.22, 130, 46, 0.17);
+      if (s === 4 || s === 12) playSnare(0.12, 210, 0.11, true);
+      if (s % 2 === 0) playHat(s % 4 === 2 ? 0.05 : 0.025, s % 4 === 2);
+
+      // Alternating country/folk root-fifth bass
+      if (s === 0 || s === 8) playNote(roots[bar], "triangle", 0.1, 0.22, 600);
+      if (s === 4 || s === 12) playNote(roots[bar] + 7, "triangle", 0.085, 0.18, 600);
+
+      // Brisk acoustic strum pattern (D - D U - U D U)
+      if ([0, 4, 6, 10, 12, 14].includes(s)) {
+        strumChords[bar].forEach((n, idx) => {
+          window.setTimeout(() => {
+            playNote(n, "triangle", 0.028, 0.16, 2600);
+          }, idx * 11);
+        });
+      }
+
+      // Cheerful high whistle hook
+      const wNote = whistleMelody[step % 32];
+      if (wNote > 0) {
+        playNote(wNote, "sine", 0.068, 0.24, 3800);
+      }
+    };
+  } else if (id === "lofi") {
+    // "Passport Stamp Groove" — Bouncy Boom-Bap Beat, Warm Rhodes Chords & Vlog Melody (94 BPM)
+    bpm = 94;
+    const roots = [38, 43, 36, 45]; // Dm7 - G7 - Cmaj7 - A7
+    const rhodesChords = [
+      [62, 65, 69, 72],
+      [59, 65, 67, 74],
+      [60, 64, 67, 71],
+      [61, 64, 69, 72],
+    ];
+    const lofiHook = [
+      74, 0, 72, 69, 0, 65, 69, 72, 71, 0, 67, 62, 0, 0, 67, 71,
+      72, 0, 71, 67, 64, 0, 67, 71, 69, 0, 73, 76, 73, 69, 64, 0,
+    ];
+    tickStep = (step) => {
+      const bar = Math.floor(step / 16) % 4;
+      const s = step % 16;
+
+      // Boom-bap swung kick & crisp snare
+      if (s === 0 || s === 7 || s === 10) playKick(0.24, 135, 42, 0.19);
+      if (s === 4 || s === 12) playSnare(0.13, 180, 0.11, false);
+      if (s % 2 === 0) playHat(0.038, s === 14);
+
+      if (s === 0 || s === 7 || s === 10 || s === 14) {
+        playNote(roots[bar], "sine", 0.12, 0.24, 480);
+      }
+
+      if (s === 0 || s === 6 || s === 11) {
+        playChord(rhodesChords[bar], "sine", 0.036, 0.35, 1600);
+      }
+
+      const lNote = lofiHook[step % 32];
+      if (lNote > 0) {
+        playNote(lNote, "triangle", 0.055, 0.22, 2400);
+      }
+    };
+  } else if (id === "cinematic") {
+    // "Odyssey Blockbuster" — Driving Stadium Adventure Drums, Brass Anthem & Strings (112 BPM)
+    bpm = 112;
+    const roots = [38, 46, 41, 48]; // Dm - Bb - F - C
+    const anthemLead = [
+      62, 0, 69, 0, 74, 0, 72, 69, 70, 0, 65, 0, 74, 0, 72, 0,
+      69, 0, 72, 0, 77, 0, 76, 72, 76, 0, 79, 0, 84, 0, 79, 0,
+    ];
+    tickStep = (step) => {
+      const bar = Math.floor(step / 16) % 4;
+      const s = step % 16;
+
+      // Epic taiko / stadium toms & snare march
+      if (s === 0 || s === 3 || s === 6 || s === 8 || s === 12) {
+        playKick(0.25, 145, 40, 0.2);
+      }
+      if (s === 4 || s === 12 || s === 15) {
+        playSnare(0.14, 165, 0.16, false);
+      }
+      if (s % 2 === 0) playHat(0.04, s === 14);
+
+      // Spiccato string ostinato on 16th notes
+      const ostinato = roots[bar] + 12 + (s % 2 === 0 ? 0 : 7);
+      playNote(ostinato, "sawtooth", 0.055, 0.12, 1150);
+
+      // Soaring heroic brass melody
+      const aNote = anthemLead[step % 32];
+      if (aNote > 0) {
+        playNote(aNote, "sawtooth", 0.06, 0.28, 2400, -4);
+        playNote(aNote - 12, "sawtooth", 0.045, 0.28, 1800, 4);
+      }
+    };
+  }
+
+  const stepMs = Math.round((60 / bpm / 4) * 1000);
+  let stepCounter = 0;
+  // Trigger step 0 immediately so music starts with zero lag
+  tickStep(stepCounter++);
+  const timer = window.setInterval(() => {
+    tickStep(stepCounter++);
+  }, stepMs);
+
+  return {
+    stop: () => {
+      window.clearInterval(timer);
+      const t = audio.currentTime;
+      try {
+        musicBus.gain.cancelScheduledValues(t);
+        musicBus.gain.setValueAtTime(Math.max(0.0001, musicBus.gain.value), t);
+        musicBus.gain.linearRampToValueAtTime(0.0001, t + 0.12);
+      } catch {
+        /* ignore */
+      }
+    },
+  };
 }
 
 /**
@@ -700,55 +1250,19 @@ export async function createAudioSession(options: {
   master.connect(audio.destination);
   master.connect(dest);
 
-  const nodes: { osc: OscillatorNode; g: GainNode }[] = [];
-  const timers: number[] = [];
   let currentLegHandle: { stop: () => void } | null = null;
-
-  const id = options.music;
-  if (id === "ambient") {
-    nodes.push(tone(audio, master, 110, "sine", 0.05, 1.2));
-    nodes.push(tone(audio, master, 164.81, "sine", 0.03, 1.6));
-    nodes.push(tone(audio, master, 220, "triangle", 0.02, 1.8));
-  } else if (id === "synthwave") {
-    nodes.push(tone(audio, master, 55, "sawtooth", 0.035, 0.2));
-    nodes.push(tone(audio, master, 220, "square", 0.012, 0.05));
-    const lfo = audio.createOscillator();
-    const lfoGain = audio.createGain();
-    lfo.frequency.value = 2;
-    lfoGain.gain.value = 18;
-    lfo.connect(lfoGain);
-    lfoGain.connect(nodes[1].osc.frequency);
-    lfo.start();
-    nodes.push({ osc: lfo, g: lfoGain });
-  } else if (id === "cinematic") {
-    nodes.push(tone(audio, master, 65.41, "sine", 0.06, 1.4));
-    nodes.push(tone(audio, master, 98, "triangle", 0.03, 1.8));
-    nodes.push(tone(audio, master, 196, "sine", 0.015, 2));
-  } else if (id === "folk") {
-    const scale = [261.63, 293.66, 329.63, 392, 440];
-    scale.forEach((freq, i) => {
-      const osc = audio.createOscillator();
-      const g = audio.createGain();
-      osc.type = "triangle";
-      osc.frequency.value = freq;
-      g.gain.value = 0;
-      osc.connect(g);
-      g.connect(master);
-      osc.start();
-      const pulse = () => {
-        const t = audio.currentTime;
-        g.gain.cancelScheduledValues(t);
-        g.gain.setValueAtTime(0, t);
-        g.gain.linearRampToValueAtTime(0.03, t + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
-      };
-      timers.push(window.setInterval(pulse, 700 + i * 180));
-      nodes.push({ osc, g });
-    });
-  }
+  const groove = options.music !== "none" ? startGrooveEngine(audio, master, options.music) : null;
 
   return {
     dest,
+    triggerIntro: (durationSec = 1.1) => {
+      if (!options.soundEffects) return;
+      currentLegHandle?.stop();
+      if (audio.state === "suspended") {
+        audio.resume().catch(() => {});
+      }
+      currentLegHandle = playTransportSoundOnNode(audio, master, "line", Math.max(0.65, durationSec));
+    },
     triggerLeg: (transport: Transport, durationSec = 2.2) => {
       if (!options.soundEffects) return;
       currentLegHandle?.stop();
@@ -757,11 +1271,14 @@ export async function createAudioSession(options: {
       }
       currentLegHandle = playTransportSoundOnNode(audio, master, transport, durationSec);
     },
-    triggerArrival: () => {
+    triggerArrival: (hasPhotos = false) => {
       if (!options.soundEffects) return;
       currentLegHandle?.stop();
       currentLegHandle = null;
-      playArrivalChimeOnNode(audio, master);
+      if (audio.state === "suspended") {
+        audio.resume().catch(() => {});
+      }
+      playArrivalChimeOnNode(audio, master, hasPhotos);
     },
     stopLeg: () => {
       currentLegHandle?.stop();
@@ -770,18 +1287,7 @@ export async function createAudioSession(options: {
     stop: () => {
       currentLegHandle?.stop();
       currentLegHandle = null;
-      timers.forEach((timer) => window.clearInterval(timer));
-      const t = audio.currentTime;
-      nodes.forEach(({ osc, g }) => {
-        try {
-          g.gain.cancelScheduledValues(t);
-          g.gain.setValueAtTime(g.gain.value, t);
-          g.gain.linearRampToValueAtTime(0, t + 0.15);
-          osc.stop(t + 0.2);
-        } catch {
-          /* already stopped */
-        }
-      });
+      groove?.stop();
     },
   };
 }

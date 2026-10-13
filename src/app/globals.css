@@ -1077,6 +1077,40 @@ img {
   flex-direction: column;
 }
 
+.studio-side-footer {
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  padding: 10px 16px;
+  font-size: 12px;
+  color: #64748b;
+  text-align: center;
+  background: rgba(11, 16, 29, 0.94);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line);
+  z-index: 10;
+}
+
+.studio-side-footer .footer-heart {
+  color: #f43f5e;
+  display: inline-block;
+  margin: 0 2px;
+}
+
+.studio-side-footer a {
+  color: #cbd5e1;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(203, 213, 225, 0.35);
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.studio-side-footer a:hover {
+  color: #38bdf8;
+  text-decoration-color: #38bdf8;
+}
+
 /* Segmented Tabs */
 .tabs {
   display: grid;
@@ -1507,6 +1541,63 @@ img {
   color: #fff;
 }
 
+.photo-quick-btn {
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.photo-quick-btn input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.stop-inline-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 10px 6px 32px;
+}
+
+.stop-inline-thumb {
+  position: relative;
+  width: 48px;
+  height: 36px;
+  margin: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+
+.stop-inline-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.stop-inline-thumb button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(15, 23, 42, 0.85);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
 /* Leg Transport Connector */
 .leg-connector {
   display: flex;
@@ -1778,12 +1869,12 @@ img {
 .music-card {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 10px;
   background: #131c31;
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 12px 14px;
-  cursor: pointer;
+  padding: 10px 12px;
   transition: all 0.15s ease;
 }
 
@@ -1796,18 +1887,61 @@ img {
   border-color: var(--blue);
 }
 
-.music-card div {
+.music-card.playing {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3), 0 0 18px rgba(56, 189, 248, 0.2);
+}
+
+.music-card-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.music-card-main input[type="radio"] {
+  accent-color: var(--blue-2);
+  flex-shrink: 0;
+}
+
+.music-card-copy {
   display: grid;
-  gap: 2px;
+  gap: 3px;
+  min-width: 0;
 }
 
-.music-card strong {
-  font-size: 14px;
+.music-card-copy strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  color: var(--text);
 }
 
-.music-card small {
-  font-size: 12px;
+.music-bpm-pill {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  color: #7dd3fc;
+}
+
+.music-card-copy small {
+  font-size: 11.5px;
+  line-height: 1.35;
   color: var(--muted);
+}
+
+.music-test-btn {
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .sfx-toggle-card {
@@ -2135,6 +2269,31 @@ img {
   color: var(--muted);
   font-size: 16px;
   padding: 0 4px;
+}
+
+.map-pin-popover-photos {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0;
+}
+
+.map-pin-popover-photos img {
+  width: 58px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  flex-shrink: 0;
+}
+
+.chip-photo-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  flex-shrink: 0;
 }
 
 .map-pin-popover-actions {

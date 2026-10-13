@@ -14,10 +14,20 @@ export type Transport =
   | "camper";
 
 export type ThemeId = "earth" | "eco" | "night" | "paper" | "satellite";
+export type CameraView = "horizon" | "orbit" | "top";
 export type Aspect = "16:9" | "9:16" | "1:1";
 export type LabelMode = "current" | "visited" | "always";
 export type Units = "km" | "mi" | "none";
-export type MusicId = "none" | "ambient" | "synthwave" | "cinematic" | "folk";
+export type MusicId =
+  | "none"
+  | "ambient"
+  | "synthwave"
+  | "cinematic"
+  | "folk"
+  | "tropical"
+  | "funk"
+  | "arcade"
+  | "lofi";
 
 export type Stop = {
   id: string;
@@ -35,6 +45,7 @@ export type Leg = { transport: Transport };
 
 export type Style = {
   theme: ThemeId;
+  cameraView?: CameraView;
   background: string;
   lineColor: string;
   labelColor: string;
@@ -49,6 +60,7 @@ export type Style = {
   showFullRouteAtEnd: boolean;
   showCountryFlags: boolean;
   music: MusicId;
+  musicChosen?: boolean;
   soundEffects: boolean;
   aspect: Aspect;
   fps: 30 | 60;
@@ -199,6 +211,7 @@ export function defaultStyle(): Style {
   const theme = THEMES.earth;
   return {
     theme: "earth",
+    cameraView: "horizon",
     background: theme.bg,
     lineColor: theme.line,
     labelColor: theme.labelColor,
@@ -212,7 +225,7 @@ export function defaultStyle(): Style {
     showLogo: true,
     showFullRouteAtEnd: true,
     showCountryFlags: true,
-    music: "none",
+    music: "ambient",
     soundEffects: true,
     aspect: "16:9",
     fps: 30,
@@ -311,7 +324,7 @@ export function presentStyle(style: Style, pro: boolean): Style {
     lineColor: pro ? style.lineColor : palette.line,
     labelColor: pro ? style.labelColor : palette.labelColor,
     showLogo: pro ? style.showLogo : true,
-    music: pro ? style.music : "none",
+    music: pro ? style.music : "ambient",
     soundEffects: style.soundEffects ?? true,
     fps: pro && style.fps === 60 ? 60 : 30,
     resolution: pro && style.resolution === "1080" ? "1080" : "768",

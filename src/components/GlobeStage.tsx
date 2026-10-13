@@ -2,7 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { buildPaths } from "@/lib/geo";
-import { createAudioSession, type AudioSession } from "@/lib/music";
+import { createAudioSession, unlockAudio, type AudioSession } from "@/lib/music";
 import { animationDuration, buildSegs, drawFrame } from "@/lib/render";
 import { frameSize, legAllowed, presentStyle, type Project } from "@/lib/types";
 import { loadCountries, type CountryShape } from "@/lib/world";
@@ -34,7 +34,9 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
   const [countries, setCountries] = useState<CountryShape[] | null>(null);
   const [paths, setPaths] = useState<[number, number][][]>([]);
   const [images, setImages] = useState<Record<string, HTMLImageElement[]>>({});
-  const [ready, setReady] = useState(false);
+  const [pathsReady, setPathsReady] = useState(false);
+  const [imagesReady, setImagesReady] = useState(false);
+
   const playing = useRef(false);
   const elapsed = useRef(0);
   const started = useRef<number | null>(null);
@@ -57,14 +59,35 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
   const signature = `${shown.stops.map((stop) => `${stop.lat.toFixed(3)},${stop.lon.toFixed(3)}`).join("|")}::${shown.legs
     .map((leg) => leg.transport)
     .join(",")}`;
-  const photoKey = shown.stops.map((stop) => stop.photos.join("~")).join("|");
+  const photoKey = shown.stops.map((stop) => `${stop.id}:${stop.photos.length}:${stop.photos.map((p) => p.slice(-24)).join(",")}`).join("|");
   const pixels = size ?? frameSize(shown.style, pro);
   const duration = animationDuration(shown, paths);
+  const ready = pathsReady && imagesReady;
+
+  // Live refs so requestAnimationFrame and audio callbacks never read stale closures
+  const shownRef = useRef(shown);
+  const pathsRef = useRef(paths);
+  const countriesRef = useRef(countries);
+  const imagesRef = useRef(images);
+  const durationRef = useRef(duration);
+  const playModeRef = useRef(play);
+  const enableAudioRef = useRef(enableAudio);
+
+  shownRef.current = shown;
+  pathsRef.current = paths;
+  countriesRef.current = countries;
+  imagesRef.current = images;
+  durationRef.current = duration;
+  playModeRef.current = play;
+  enableAudioRef.current = enableAudio;
 
   useEffect(() => {
     let cancel = false;
     loadCountries().then((data) => {
-      if (!cancel) setCountries(data);
+      if (!cancel) {
+        countriesRef.current = data;
+        setCountries(data);
+      }
     });
     return () => {
       cancel = true;
@@ -73,15 +96,16 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
 
   useEffect(() => {
     let cancel = false;
-    setReady(false);
+    setPathsReady(false);
     buildPaths(
       shown.stops,
       shown.legs.map((leg) => leg.transport),
       pro
     ).then((next) => {
       if (cancel) return;
+      pathsRef.current = next;
       setPaths(next);
-      setReady(true);
+      setPathsReady(true);
     });
     return () => {
       cancel = true;
@@ -92,16 +116,32 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
 
   useEffect(() => {
     let cancel = false;
+    const totalPhotos = shown.stops.reduce((sum, s) => sum + (s.photos?.length || 0), 0);
+    if (totalPhotos === 0) {
+      imagesRef.current = {};
+      setImages({});
+      setImagesReady(true);
+      return;
+    }
+
+    setImagesReady(false);
     const next: Record<string, HTMLImageElement[]> = {};
     const tasks: Promise<void>[] = [];
+
     shown.stops.forEach((stop) => {
+      const stopPhotos = stop.photos ?? [];
+      const loadedForStop: (HTMLImageElement | null)[] = new Array(stopPhotos.length).fill(null);
       next[stop.id] = [];
-      stop.photos.forEach((src) => {
+
+      stopPhotos.forEach((src, idx) => {
+        if (!src) return;
         tasks.push(
           new Promise((resolve) => {
             const img = new Image();
             img.onload = () => {
-              next[stop.id].push(img);
+              loadedForStop[idx] = img;
+              next[stop.id] = loadedForStop.filter((item): item is HTMLImageElement => item !== null);
+              imagesRef.current = { ...imagesRef.current, [stop.id]: next[stop.id] };
               resolve();
             };
             img.onerror = () => resolve();
@@ -110,9 +150,14 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
         );
       });
     });
+
     Promise.all(tasks).then(() => {
-      if (!cancel) setImages({ ...next });
+      if (cancel) return;
+      imagesRef.current = { ...next };
+      setImages({ ...next });
+      setImagesReady(true);
     });
+
     return () => {
       cancel = true;
     };
@@ -128,21 +173,27 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
   };
 
   const syncAudioAtTime = (session: AudioSession | null, time: number) => {
-    if (!session || !shown.stops.length) return;
-    const { segs, total } = buildSegs(shown, paths);
+    const curShown = shownRef.current;
+    const curPaths = pathsRef.current;
+    if (!session || !curShown.stops.length) return;
+    const { segs, total } = buildSegs(curShown, curPaths);
     const t = Math.max(0, Math.min(time, Math.max(total - 0.001, 0)));
     const seg = segs.find((item) => t < item.start + item.dur) ?? segs[segs.length - 1];
     if (!seg) return;
     const key = `${seg.type}:${seg.index}`;
     if (key === lastSegKeyRef.current) return;
-    const prevKey = lastSegKeyRef.current;
     lastSegKeyRef.current = key;
-    if (seg.type === "leg") {
-      const transport = shown.legs[seg.index]?.transport ?? "plane";
-      const remaining = Math.max(0.4, seg.dur - (t - seg.start));
+    const remaining = Math.max(0.4, seg.dur - (t - seg.start));
+
+    if (seg.type === "intro") {
+      session.triggerIntro(remaining);
+    } else if (seg.type === "leg") {
+      const transport = curShown.legs[seg.index]?.transport ?? "plane";
       session.triggerLeg(transport, remaining);
-    } else if (seg.type === "dwell" && seg.index > 0 && prevKey.startsWith("leg:")) {
-      session.triggerArrival();
+    } else if (seg.type === "dwell") {
+      const stop = curShown.stops[seg.index];
+      const hasPhotos = Boolean(stop && stop.photos && stop.photos.length > 0);
+      session.triggerArrival(hasPhotos);
     } else {
       session.stopLeg();
     }
@@ -151,20 +202,27 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
   const paint = (time: number, audioSession: AudioSession | null = liveAudioRef.current) => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx || !countries) return;
-    drawFrame(ctx, countries, shown, paths, images, time);
+    const curCountries = countriesRef.current;
+    const curShown = shownRef.current;
+    const curPaths = pathsRef.current;
+    const curImages = imagesRef.current;
+    const curDuration = durationRef.current;
+    if (!canvas || !ctx || !curCountries) return;
+    drawFrame(ctx, curCountries, curShown, curPaths, curImages, time);
     if (playing.current || recording.current) {
       syncAudioAtTime(audioSession, time);
     }
-    onTimeRef.current?.(Math.min(time, duration), duration);
+    onTimeRef.current?.(Math.min(time, curDuration), curDuration);
   };
 
   const startLiveAudioIfEnabled = () => {
     stopLiveAudio();
-    if (!enableAudio) return;
+    if (!enableAudioRef.current) return;
+    unlockAudio();
+    const curShown = shownRef.current;
     createAudioSession({
-      music: shown.style.music,
-      soundEffects: shown.style.soundEffects ?? true,
+      music: curShown.style.music,
+      soundEffects: curShown.style.soundEffects ?? true,
     }).then((session) => {
       if (!playing.current || recording.current) {
         session?.stop();
@@ -180,13 +238,14 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     if (started.current == null) started.current = now - elapsed.current * 1000;
     const time = (now - started.current) / 1000;
     elapsed.current = time;
+    const curDuration = durationRef.current;
     paint(time);
-    if (time < duration) {
+    if (time < curDuration) {
       raf.current = requestAnimationFrame(step(id));
       return;
     }
     playing.current = false;
-    if (play === "loop") {
+    if (playModeRef.current === "loop") {
       lastSegKeyRef.current = "";
       elapsed.current = 0;
       started.current = null;
@@ -199,8 +258,10 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
   };
 
   const playNow = () => {
+    unlockAudio();
     const id = ++playId.current;
     cancelAnimationFrame(raf.current);
+    lastSegKeyRef.current = "";
     elapsed.current = 0;
     started.current = null;
     playing.current = true;
@@ -235,6 +296,7 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     }
     if (play === "auto" || play === "loop") {
       const id = ++playId.current;
+      lastSegKeyRef.current = "";
       elapsed.current = 0;
       started.current = null;
       playing.current = true;
@@ -258,19 +320,22 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     pause,
     record: async () => {
       const canvas = canvasRef.current;
-      if (!canvas || !countries) throw new Error("Canvas is not ready");
+      if (!canvas || !countriesRef.current) throw new Error("Canvas is not ready");
+      unlockAudio();
       await document.fonts.ready;
       const id = ++playId.current;
       cancelAnimationFrame(raf.current);
       playing.current = false;
       stopLiveAudio();
       recording.current = true;
-      const total = Math.max(animationDuration(shown, paths), 0.4);
-      const fps = shown.style.fps;
+      const curShown = shownRef.current;
+      const curPaths = pathsRef.current;
+      const total = Math.max(animationDuration(curShown, curPaths), 0.4);
+      const fps = curShown.style.fps;
       const stream = canvas.captureStream(fps);
       const audioSession = await createAudioSession({
-        music: shown.style.music,
-        soundEffects: shown.style.soundEffects ?? true,
+        music: curShown.style.music,
+        soundEffects: curShown.style.soundEffects ?? true,
       });
       audioSession?.dest.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
       const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
