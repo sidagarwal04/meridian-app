@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { PageShell } from "@/components/PageShell";
 
@@ -8,10 +9,28 @@ export default function Page() {
   return (
     <PageShell>
       <div className="page">
-        <h1>Contacts</h1>
-        <p className="lead">Questions about a route. This note stays on your device.</p>
+        <div className="page-hero-head">
+          <span className="hero-badge">
+            <span className="badge-dot" /> Get in Touch
+          </span>
+          <h1>Contacts</h1>
+          <p className="lead">Questions, route feedback, or feature ideas. Notes are saved locally on your device.</p>
+        </div>
+
         {sent ? (
-          <p className="notice">Saved on this device. Nothing was emailed.</p>
+          <div className="contact-card" style={{ textAlign: "center", padding: "36px 28px" }}>
+            <span className="feature-icon" style={{ margin: "0 auto" }}>✓</span>
+            <h2>Note saved on this device</h2>
+            <p style={{ color: "var(--muted)" }}>Your feedback has been recorded in local storage.</p>
+            <div className="hero-actions" style={{ justifyContent: "center" }}>
+              <button className="btn ghost" type="button" onClick={() => setSent(false)}>
+                Write another note
+              </button>
+              <Link className="btn primary" href="/videos">
+                Back to Studio
+              </Link>
+            </div>
+          </div>
         ) : (
           <form
             className="contact-card"
@@ -25,19 +44,19 @@ export default function Page() {
             }}
           >
             <label className="field">
-              Name
-              <input name="name" required />
+              <span className="field-label">Your Name</span>
+              <input name="name" placeholder="Alex Rivera" required />
             </label>
             <label className="field">
-              Email
-              <input name="email" type="email" required />
+              <span className="field-label">Email Address</span>
+              <input name="email" type="email" placeholder="alex@example.com" required />
             </label>
             <label className="field">
-              Message
-              <textarea name="message" rows={5} required />
+              <span className="field-label">Message</span>
+              <textarea name="message" rows={5} placeholder="Tell us about your trip or feature request…" required />
             </label>
-            <button className="btn primary" type="submit">
-              Save note
+            <button className="btn primary lg wide" type="submit">
+              Save Note →
             </button>
           </form>
         )}

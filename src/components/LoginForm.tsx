@@ -2,33 +2,58 @@
 
 import Link from "next/link";
 import { signIn } from "next-auth/react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect } from "react";
+import { useAuth } from "@/components/AuthProvider";
+import { BrandMark } from "@/components/Logo";
 import { PageShell } from "@/components/PageShell";
 import { useI18n } from "@/lib/i18n";
 
+function afterAuthPath(raw: string | null) {
+  if (!raw) return "/videos";
+  if (raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  if (typeof window === "undefined") return "/videos";
+  try {
+    const url = new URL(raw);
+    if (url.origin === window.location.origin) return `${url.pathname}${url.search}${url.hash}` || "/videos";
+  } catch {
+    return "/videos";
+  }
+  return "/videos";
+}
+
 export function LoginForm({ googleReady }: { googleReady: boolean }) {
   const { t } = useI18n();
+  const { ready, user } = useAuth();
+  const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/videos";
+  const next = afterAuthPath(params.get("next") || params.get("callbackUrl"));
   const error = params.get("error");
 
+  useEffect(() => {
+    if (!ready || !user) return;
+    router.replace(next);
+  }, [ready, user, next, router]);
+
+  if (ready && user) return null;
+
   return (
-    <PageShell>
-      <div className="login-wrap">
+    <PageShell fill>
+      <div className="login-stage">
         <div className="login-card">
-          <div className="login-grid">
-            <div>
-              <h1>{t("welcome")}</h1>
-              <p>{t("welcomeA")}</p>
-              <p>{t("welcomeB")}</p>
-            </div>
-            <div className="plane" aria-hidden="true">✈</div>
-          </div>
-          <p>{t("signInWith")}</p>
+          <BrandMark className="login-mark" />
+          <h1>{t("welcome")}</h1>
+          <p className="login-lede">
+            {t("welcomeA")} {t("welcomeB")}
+          </p>
           {googleReady ? (
-            <button className="btn google-btn wide" type="button" onClick={() => signIn("google", { callbackUrl: next })}>
+            <button
+              className="btn google-btn"
+              type="button"
+              onClick={() => signIn("google", { callbackUrl: `${window.location.origin}${next}` })}
+            >
               <GoogleMark />
-              Continue with Google
+              {t("continueGoogle")}
             </button>
           ) : (
             <div className="setup-note">

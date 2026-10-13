@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { searchCities } from "@/lib/cities";
-import { nearestCity } from "@/lib/geo";
+import { flagEmoji, haversineKm, nearestCity } from "@/lib/geo";
 import { parseGeoJson, parseGpx, parseItinerary, parseKml, placesFromGoogleUrl, simplifyTrack } from "@/lib/parse";
 import { encodeRoute } from "@/lib/share";
 import { getProject, saveProject } from "@/lib/storage";
@@ -16,7 +16,9 @@ import {
   legAllowed,
   limitsFor,
   makeStop,
+  starterStops,
   uid,
+  type Leg,
   type Project,
   type Stop,
   type ThemeId,
@@ -28,7 +30,35 @@ import { Logo } from "./Logo";
 import { MapEditor } from "./MapEditor";
 
 type Tab = "route" | "photos" | "options" | "music";
+type StageMode = "map" | "globe";
 type PlaceHit = { name: string; country: string; code: string; lat: number; lon: number; label?: string };
+
+function normalizeLegs(stops: Stop[], legs: Leg[]): Leg[] {
+  const needed = Math.max(0, stops.length - 1);
+  return Array.from({ length: needed }, (_, i) => ({
+    transport: legs[i]?.transport ?? "plane",
+  }));
+}
+
+function sanitizeProject(project: Project): Project {
+  const validStops = (project.stops ?? []).filter(
+    (s) =>
+      s &&
+      typeof s.lat === "number" &&
+      typeof s.lon === "number" &&
+      Number.isFinite(s.lat) &&
+      Number.isFinite(s.lon) &&
+      Math.abs(s.lat) <= 85.5 &&
+      Math.abs(s.lon) <= 180
+  );
+  const stops = validStops.length > 0 ? validStops : starterStops();
+  const legs = normalizeLegs(stops, project.legs ?? []);
+  return {
+    ...project,
+    stops,
+    legs,
+  };
+}
 
 export function Studio() {
   const params = useParams<{ id: string }>();
@@ -36,6 +66,7 @@ export function Studio() {
   const { ready, user } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
   const [tab, setTab] = useState<Tab>("route");
+  const [stageMode, setStageMode] = useState<StageMode>("map");
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<PlaceHit[]>([]);
   const [notice, setNotice] = useState("");
@@ -45,7 +76,11 @@ export function Studio() {
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [lock, setLock] = useState("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [showImports, setShowImports] = useState(false);
   const globe = useRef<GlobeHandle>(null);
+  const inlineGlobe = useRef<GlobeHandle>(null);
   const limits = limitsFor(null);
   const booted = useRef(false);
 
@@ -58,7 +93,7 @@ export function Studio() {
     getProject(params.id).then((found) => {
       if (!found) router.replace("/videos");
       else {
-        setProject(found);
+        setProject(sanitizeProject(found));
         booted.current = true;
       }
     });
@@ -97,11 +132,24 @@ export function Studio() {
 
   const photoCount = project?.stops.reduce((sum, stop) => sum + stop.photos.length, 0) ?? 0;
 
-  const summary = useMemo(() => project?.stops.map((stop) => stop.name).join(" → ") ?? "", [project]);
+  const totalDistanceKm = useMemo(() => {
+    if (!project || project.stops.length < 2) return 0;
+    let sum = 0;
+    for (let i = 1; i < project.stops.length; i++) {
+      sum += haversineKm(project.stops[i - 1], project.stops[i]);
+    }
+    return Math.round(sum);
+  }, [project]);
+
+  const pinnedStopsCount = useMemo(
+    () => project?.stops.filter((s) => s.name === "Pinned place").length ?? 0,
+    [project]
+  );
 
   if (!project) {
     return (
       <div className="studio-loading">
+        <div className="loading-spinner" />
         <p>Opening studio…</p>
       </div>
     );
@@ -115,21 +163,30 @@ export function Studio() {
   };
 
   const addStop = (place: PlaceHit) => {
+    if (!Number.isFinite(place.lat) || !Number.isFinite(place.lon)) return;
+    const safeLat = Math.max(-85, Math.min(85, place.lat));
+    const safeLon = Math.max(-180, Math.min(180, place.lon));
     if (project.stops.length >= limits.maxStops) {
       setLock(`A route can hold ${limits.maxStops} places.`);
       return;
     }
-    update((current) => ({
-      ...current,
-      stops: [...current.stops, makeStop(place)],
-      legs: current.stops.length ? [...current.legs, { transport: "plane" }] : current.legs,
-    }));
+    update((current) => {
+      const stops = [...current.stops, makeStop({ ...place, lat: safeLat, lon: safeLon })];
+      return {
+        ...current,
+        stops,
+        legs: normalizeLegs(stops, [...current.legs, { transport: "plane" }]),
+      };
+    });
     setQuery("");
     setHits([]);
     setNotice("");
   };
 
   const addAt = async (lat: number, lon: number) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 85.5 || Math.abs(lon) > 180) {
+      return;
+    }
     const near = nearestCity(lat, lon, 45);
     let place: PlaceHit = near
       ? { ...near }
@@ -154,18 +211,92 @@ export function Studio() {
       const legs = [...current.legs];
       if (index < legs.length) legs.splice(index, 1);
       else if (legs.length) legs.splice(index - 1, 1);
-      return { ...current, stops, legs };
+      return { ...current, stops, legs: normalizeLegs(stops, legs) };
+    });
+  };
+
+  const moveStopTo = (fromIndex: number, toIndex: number) => {
+    update((current) => {
+      if (
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= current.stops.length ||
+        toIndex >= current.stops.length
+      ) {
+        return current;
+      }
+      const stops = [...current.stops];
+      const [moved] = stops.splice(fromIndex, 1);
+      stops.splice(toIndex, 0, moved);
+      return {
+        ...current,
+        stops,
+        legs: normalizeLegs(stops, current.legs),
+      };
     });
   };
 
   const moveStop = (index: number, dir: -1 | 1) => {
+    moveStopTo(index, index + dir);
+  };
+
+  const reverseStops = () => {
     update((current) => {
-      const next = index + dir;
-      if (next < 0 || next >= current.stops.length) return current;
-      const stops = [...current.stops];
-      [stops[index], stops[next]] = [stops[next], stops[index]];
-      return { ...current, stops };
+      if (current.stops.length < 2) return current;
+      const stops = [...current.stops].reverse();
+      const legs = [...current.legs].reverse();
+      return { ...current, stops, legs: normalizeLegs(stops, legs) };
     });
+    setNotice("Reversed route order.");
+  };
+
+  const clearAllStops = () => {
+    update((current) => ({
+      ...current,
+      stops: [],
+      legs: [],
+    }));
+    setNotice("Cleared all places. Search or click the map to add stops.");
+  };
+
+  const removePinnedStops = () => {
+    update((current) => {
+      const stops = current.stops.filter((s) => s.name !== "Pinned place");
+      return {
+        ...current,
+        stops,
+        legs: normalizeLegs(stops, current.legs),
+      };
+    });
+    setNotice("Removed accidental pinned places.");
+  };
+
+  const resetStarterRoute = () => {
+    const stops = starterStops();
+    update((current) => ({
+      ...current,
+      stops,
+      legs: normalizeLegs(stops, []),
+    }));
+    setNotice("Restored starter route (Lisbon → Paris → Rome).");
+  };
+
+  const updateStopCoord = async (index: number, coord: { lat: number; lon: number }) => {
+    const near = nearestCity(coord.lat, coord.lon, 45);
+    update((current) => ({
+      ...current,
+      stops: current.stops.map((s, i) =>
+        i === index
+          ? {
+              ...s,
+              lat: coord.lat,
+              lon: coord.lon,
+              ...(near ? { name: near.name, country: near.country, code: near.code } : {}),
+            }
+          : s
+      ),
+    }));
   };
 
   const setTransport = (index: number, transport: Transport) => {
@@ -336,204 +467,499 @@ export function Studio() {
     }
   };
 
+  const TABS: { id: Tab; label: string; icon: string; badge?: number }[] = [
+    { id: "route", label: "Route", icon: "📍", badge: project.stops.length },
+    { id: "photos", label: "Photos", icon: "🖼", badge: photoCount || undefined },
+    { id: "options", label: "Style", icon: "🎨" },
+    { id: "music", label: "Audio", icon: "🎵" },
+  ];
+
   return (
     <div className="studio">
       <header className="studio-top">
-        <Logo />
-        <input
-          className="title-input"
-          aria-label="Video title"
-          value={project.title}
-          onChange={(event) => update({ title: event.target.value })}
-        />
-        <span className="credits">{user?.name ?? "Free"}</span>
-        <button className="btn ghost" onClick={() => setPreview(true)}>
-          Preview
-        </button>
-        <button className="btn primary" onClick={() => { setPreview(true); }}>
-          Export
-        </button>
-        <Link href="/videos" className="btn ghost">
-          Library
-        </Link>
+        <div className="studio-top-left">
+          <Logo />
+          <span className="studio-divider" />
+          <div className="title-input-wrap">
+            <input
+              className="title-input"
+              aria-label="Video title"
+              placeholder="Untitled trip…"
+              value={project.title}
+              onChange={(event) => update({ title: event.target.value })}
+            />
+          </div>
+        </div>
+
+        <div className="studio-stage-toggle" role="group" aria-label="Workspace view">
+          <button
+            type="button"
+            className={stageMode === "map" ? "active" : ""}
+            onClick={() => setStageMode("map")}
+          >
+            🗺 2D Map Editor
+          </button>
+          <button
+            type="button"
+            className={stageMode === "globe" ? "active" : ""}
+            onClick={() => setStageMode("globe")}
+          >
+            🌍 3D Globe Live
+          </button>
+        </div>
+
+        <div className="studio-top-right">
+          <span className="credits-badge">
+            {project.stops.length} stops · {totalDistanceKm.toLocaleString()} km
+          </span>
+          <button className="btn ghost sm" onClick={share} title="Copy shareable route link">
+            Share
+          </button>
+          <button className="btn ghost sm" onClick={() => setPreview(true)}>
+            ▶ Preview
+          </button>
+          <button className="btn primary sm" onClick={() => setPreview(true)}>
+            Export Video
+          </button>
+          <Link href="/videos" className="btn ghost sm">
+            Library
+          </Link>
+        </div>
       </header>
+
       <div className="studio-main">
         <aside className="studio-side">
           <div className="tabs" role="tablist">
-            {(["route", "photos", "options", "music"] as Tab[]).map((item) => (
-              <button key={item} role="tab" aria-selected={tab === item} className={tab === item ? "on" : ""} onClick={() => setTab(item)}>
-                {item[0].toUpperCase() + item.slice(1)}
+            {TABS.map((item) => (
+              <button
+                key={item.id}
+                role="tab"
+                aria-selected={tab === item.id}
+                className={tab === item.id ? "on" : ""}
+                onClick={() => setTab(item.id)}
+              >
+                <span className="tab-icon">{item.icon}</span>
+                <span>{item.label}</span>
+                {item.badge !== undefined ? <span className="tab-badge">{item.badge}</span> : null}
               </button>
             ))}
           </div>
-          {notice ? <p className="notice">{notice}</p> : null}
+
+          {notice ? (
+            <div className="notice" role="status">
+              <span>{notice}</span>
+              <button type="button" className="notice-dismiss" aria-label="Dismiss notice" onClick={() => setNotice("")}>
+                ×
+              </button>
+            </div>
+          ) : null}
+
           {tab === "route" ? (
             <div className="side-body">
-              <p className="hint">Starter route is Lisbon → Paris → Rome. Search, click the map, or replace it.</p>
-              <label className="field">
-                Add a place
-                <input value={query} placeholder="City, address, or place" onChange={(event) => setQuery(event.target.value)} />
-              </label>
-              {hits.length ? (
-                <ul className="hits">
-                  {hits.map((hit) => (
-                    <li key={`${hit.name}-${hit.lat}`}>
-                      <button onClick={() => addStop(hit)}>
-                        <strong>{hit.name}</strong>
-                        <span>{hit.label || hit.country}</span>
+              {/* Place Search Box */}
+              <div className="search-card">
+                <label className="field">
+                  <span className="field-label">Add a destination</span>
+                  <div className="search-input-wrap">
+                    <span className="search-icon" aria-hidden="true">🔍</span>
+                    <input
+                      value={query}
+                      placeholder="Search city, landmark, or place…"
+                      onChange={(event) => setQuery(event.target.value)}
+                    />
+                    {query ? (
+                      <button
+                        type="button"
+                        className="search-clear"
+                        aria-label="Clear search"
+                        onClick={() => {
+                          setQuery("");
+                          setHits([]);
+                        }}
+                      >
+                        ×
                       </button>
+                    ) : null}
+                  </div>
+                </label>
+                {hits.length ? (
+                  <ul className="hits">
+                    {hits.map((hit) => (
+                      <li key={`${hit.name}-${hit.lat}-${hit.lon}`}>
+                        <button type="button" onClick={() => addStop(hit)}>
+                          <div className="hit-main">
+                            <strong>
+                              {hit.code ? `${flagEmoji(hit.code)} ` : ""}
+                              {hit.name}
+                            </strong>
+                            <span>{hit.label || hit.country}</span>
+                          </div>
+                          <span className="hit-add-pill">＋ Add</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+
+              {/* Route Stops Header + Bulk Actions */}
+              <div className="stops-section-header">
+                <div className="stops-title-group">
+                  <h3>Your Route</h3>
+                  <span className="stops-counter">
+                    {project.stops.length} / {limits.maxStops}
+                  </span>
+                </div>
+                <div className="stops-bulk-actions">
+                  {project.stops.length > 1 ? (
+                    <button
+                      type="button"
+                      className="mini-action-btn"
+                      onClick={reverseStops}
+                      title="Reverse the order of all stops"
+                    >
+                      ⇄ Reverse
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="mini-action-btn"
+                    onClick={resetStarterRoute}
+                    title="Reset to Lisbon → Paris → Rome"
+                  >
+                    ↺ Reset
+                  </button>
+                  {project.stops.length > 0 ? (
+                    <button
+                      type="button"
+                      className="mini-action-btn danger"
+                      onClick={clearAllStops}
+                      title="Remove all places from route"
+                    >
+                      Clear all
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* Helpful banner if accidental map pins exist */}
+              {pinnedStopsCount > 0 ? (
+                <div className="pinned-cleanup-banner">
+                  <span>
+                    {pinnedStopsCount} map-clicked {pinnedStopsCount === 1 ? "pin" : "pins"} in route
+                  </span>
+                  <button type="button" onClick={removePinnedStops}>
+                    Remove {pinnedStopsCount === 1 ? "it" : "all"} ×
+                  </button>
+                </div>
+              ) : null}
+
+              <p className="hint">
+                Drag stops by <strong>⋮⋮</strong> or use <strong>↑ ↓</strong> to reorder, and click <strong>×</strong> to remove.
+              </p>
+
+              {/* Interactive Draggable Stop List */}
+              {project.stops.length > 0 ? (
+                <ol className="stop-list">
+                  {project.stops.map((stop, index) => (
+                    <li
+                      key={stop.id}
+                      draggable
+                      onDragStart={() => setDragIndex(index)}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        if (dropIndex !== index) setDropIndex(index);
+                      }}
+                      onDragLeave={() => setDropIndex((curr) => (curr === index ? null : curr))}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        if (dragIndex !== null && dragIndex !== index) {
+                          moveStopTo(dragIndex, index);
+                        }
+                        setDragIndex(null);
+                        setDropIndex(null);
+                      }}
+                      onDragEnd={() => {
+                        setDragIndex(null);
+                        setDropIndex(null);
+                      }}
+                      className={`stop-item ${dragIndex === index ? "dragging" : ""} ${
+                        dropIndex === index ? "drop-over" : ""
+                      }`}
+                    >
+                      <div className="stop-row">
+                        <span className="drag-handle" title="Drag to reorder stop" aria-hidden="true">
+                          ⋮⋮
+                        </span>
+                        <span
+                          className={`idx ${
+                            index === 0 ? "start" : index === project.stops.length - 1 ? "end" : ""
+                          }`}
+                        >
+                          {index + 1}
+                        </span>
+                        <div className="stop-info">
+                          <strong>
+                            {stop.code ? `${flagEmoji(stop.code)} ` : ""}
+                            {stop.name}
+                          </strong>
+                          <small>
+                            {stop.country || `${stop.lat.toFixed(2)}°, ${stop.lon.toFixed(2)}°`}
+                          </small>
+                        </div>
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="action-btn"
+                            aria-label="Move up"
+                            title="Move stop up"
+                            onClick={() => moveStop(index, -1)}
+                            disabled={index === 0}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            className="action-btn"
+                            aria-label="Move down"
+                            title="Move stop down"
+                            onClick={() => moveStop(index, 1)}
+                            disabled={index === project.stops.length - 1}
+                          >
+                            ↓
+                          </button>
+                          <button
+                            type="button"
+                            className="action-btn remove-btn"
+                            aria-label="Remove"
+                            title={`Remove ${stop.name}`}
+                            onClick={() => removeStop(index)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+
+                      {project.legs[index] ? (
+                        <div className="leg-connector">
+                          <span className="leg-line" aria-hidden="true" />
+                          <label className="leg-select-wrap">
+                            <span className="sr-only">Transport to next stop</span>
+                            <select
+                              aria-label="Transport to next stop"
+                              value={project.legs[index].transport}
+                              onChange={(event) => setTransport(index, event.target.value as Transport)}
+                            >
+                              {TRANSPORTS.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.icon} {item.label}
+                                  {item.tier === "pro" && !limits.pro ? " · Pro" : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          {project.stops[index + 1] ? (
+                            <span className="leg-distance">
+                              {Math.round(haversineKm(stop, project.stops[index + 1])).toLocaleString()} km
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </li>
                   ))}
-                </ul>
-              ) : null}
-              <ol className="stop-list">
-                {project.stops.map((stop, index) => (
-                  <li key={stop.id}>
-                    <div className="stop-row">
-                      <span className="idx">{index + 1}</span>
-                      <div>
-                        <strong>{stop.name}</strong>
-                        <small>{stop.country}</small>
-                      </div>
-                      <div className="row-actions">
-                        <button aria-label="Move up" onClick={() => moveStop(index, -1)} disabled={index === 0}>↑</button>
-                        <button aria-label="Move down" onClick={() => moveStop(index, 1)} disabled={index === project.stops.length - 1}>↓</button>
-                        <button aria-label="Remove" onClick={() => removeStop(index)}>×</button>
-                      </div>
-                    </div>
-                    {project.legs[index] ? (
-                      <label className="field tight">
-                        Transport to next stop
-                        <select
-                          value={project.legs[index].transport}
-                          onChange={(event) => setTransport(index, event.target.value as Transport)}
-                        >
-                          {TRANSPORTS.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.icon} {item.label}
-                              {item.tier === "pro" && !limits.pro ? " · Pro" : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
-                  </li>
-                ))}
-              </ol>
+                </ol>
+              ) : (
+                <div className="empty-stops-card">
+                  <p>Your route is empty.</p>
+                  <span>Search for a city above, click on the map, or load a ready-made template below.</span>
+                  <button type="button" className="btn ghost sm" onClick={resetStarterRoute}>
+                    Load starter route
+                  </button>
+                </div>
+              )}
+
+              {/* Templates & Import Section */}
+              <div className="side-divider" />
+
               <label className="field">
-                Templates
+                <span className="field-label">Ready-made route templates</span>
                 <select defaultValue="" onChange={(event) => event.target.value && applyTemplate(event.target.value)}>
-                  <option value="">Choose a ready-made route</option>
+                  <option value="">Choose a curated route…</option>
                   {TEMPLATES.map((template) => (
                     <option key={template.id} value={template.id}>
-                      {template.title}
+                      {template.title} ({template.project.stops.length} stops)
                     </option>
                   ))}
                 </select>
               </label>
-              <label className="field">
-                Describe the trip
-                <textarea
-                  rows={4}
-                  placeholder={"Lisbon\nTrain to Madrid\nFlight to Rome\nBoat to Athens"}
-                  value={itinerary}
-                  onChange={(event) => setItinerary(event.target.value)}
-                />
-              </label>
-              <button className="btn ghost wide" onClick={importItinerary}>
-                Build route from text
+
+              <button
+                type="button"
+                className="import-accordion-btn"
+                aria-expanded={showImports}
+                onClick={() => setShowImports((v) => !v)}
+              >
+                <span>📥 Import from text, Google Maps, or GPX/KML</span>
+                <span>{showImports ? "▾" : "▸"}</span>
               </button>
-              <label className="field">
-                Google Maps link
-                <input value={mapsUrl} placeholder="https://www.google.com/maps/dir/..." onChange={(event) => setMapsUrl(event.target.value)} />
-              </label>
-              <button className="btn ghost wide" onClick={importMaps}>
-                Import link
-              </button>
-              <label className="btn ghost wide file">
-                Import GPX, KML, or GeoJSON
-                <input
-                  type="file"
-                  accept=".gpx,.kml,.geojson,.json"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) onFile(file);
-                    event.target.value = "";
-                  }}
-                />
-              </label>
-            </div>
-          ) : null}
-          {tab === "photos" ? (
-            <div className="side-body">
-              <p className="hint">
-                {photoCount}/{limits.maxPhotos} photos. Each one appears while the camera holds on that stop.
-              </p>
-              {project.stops.map((stop, index) => (
-                <div key={stop.id} className="photo-stop">
-                  <strong>{stop.name}</strong>
-                  <label className="field tight">
-                    Pause (seconds)
-                    <input
-                      type="number"
-                      min={0.4}
-                      max={6}
-                      step={0.1}
-                      value={stop.dwellSec}
-                      onChange={(event) =>
-                        update((current) => ({
-                          ...current,
-                          stops: current.stops.map((item, itemIndex) =>
-                            itemIndex === index ? { ...item, dwellSec: Number(event.target.value) } : item
-                          ),
-                        }))
-                      }
+
+              {showImports ? (
+                <div className="import-panel">
+                  <label className="field">
+                    <span className="field-label">Describe the trip (one stop per line)</span>
+                    <textarea
+                      rows={4}
+                      placeholder={"Lisbon\nTrain to Madrid\nFlight to Rome\nBoat to Athens"}
+                      value={itinerary}
+                      onChange={(event) => setItinerary(event.target.value)}
                     />
                   </label>
-                  <label className="field tight">
-                    Emoji {limits.pro ? "" : "· Pro"}
+                  <button className="btn ghost wide sm" onClick={importItinerary}>
+                    Build route from text
+                  </button>
+                  <label className="field">
+                    <span className="field-label">Google Maps directions link</span>
                     <input
-                      value={stop.emoji}
-                      maxLength={2}
-                      placeholder="🍜"
+                      value={mapsUrl}
+                      placeholder="https://www.google.com/maps/dir/..."
+                      onChange={(event) => setMapsUrl(event.target.value)}
+                    />
+                  </label>
+                  <button className="btn ghost wide sm" onClick={importMaps}>
+                    Import Google Maps link
+                  </button>
+                  <label className="btn ghost wide sm file">
+                    📂 Upload GPX, KML, or GeoJSON
+                    <input
+                      type="file"
+                      accept=".gpx,.kml,.geojson,.json"
                       onChange={(event) => {
-                        if (!limits.pro) {
-                          setLock("Emoji labels are a Pro feature.");
-                          return;
-                        }
-                        update((current) => ({
-                          ...current,
-                          stops: current.stops.map((item, itemIndex) =>
-                            itemIndex === index ? { ...item, emoji: event.target.value } : item
-                          ),
-                        }));
+                        const file = event.target.files?.[0];
+                        if (file) onFile(file);
+                        event.target.value = "";
                       }}
                     />
                   </label>
-                  <div className="thumbs">
-                    {stop.photos.map((src, photoIndex) => (
-                      <figure key={src.slice(0, 32) + photoIndex}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={src} alt="" />
-                        <button
-                          onClick={() =>
-                            update((current) => ({
-                              ...current,
-                              stops: current.stops.map((item, itemIndex) =>
-                                itemIndex === index
-                                  ? { ...item, photos: item.photos.filter((_, candidate) => candidate !== photoIndex) }
-                                  : item
-                              ),
-                            }))
-                          }
-                        >
-                          ×
-                        </button>
-                      </figure>
-                    ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {tab === "photos" ? (
+            <div className="side-body">
+              <p className="hint">
+                {photoCount}/{limits.maxPhotos} photos added. Photos appear as floating polaroids when the camera pauses on a stop.
+              </p>
+              {project.stops.map((stop, index) => (
+                <div key={stop.id} className="photo-stop">
+                  <div className="photo-stop-header">
+                    <div className="photo-stop-title">
+                      <span className="idx">{index + 1}</span>
+                      <strong>
+                        {stop.code ? `${flagEmoji(stop.code)} ` : ""}
+                        {stop.name}
+                      </strong>
+                    </div>
+                    <div className="row-actions">
+                      <button
+                        type="button"
+                        className="action-btn"
+                        aria-label="Move up"
+                        title="Move stop up"
+                        onClick={() => moveStop(index, -1)}
+                        disabled={index === 0}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="action-btn"
+                        aria-label="Move down"
+                        title="Move stop down"
+                        onClick={() => moveStop(index, 1)}
+                        disabled={index === project.stops.length - 1}
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        className="action-btn remove-btn"
+                        aria-label="Remove"
+                        title={`Remove ${stop.name}`}
+                        onClick={() => removeStop(index)}
+                      >
+                        ×
+                      </button>
+                    </div>
                   </div>
-                  <label className="btn ghost wide file">
-                    Add photos
+                  <div className="photo-stop-controls">
+                    <label className="field tight">
+                      <span className="field-label">Pause (sec)</span>
+                      <input
+                        type="number"
+                        min={0.4}
+                        max={6}
+                        step={0.1}
+                        value={stop.dwellSec}
+                        onChange={(event) =>
+                          update((current) => ({
+                            ...current,
+                            stops: current.stops.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, dwellSec: Number(event.target.value) } : item
+                            ),
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="field tight">
+                      <span className="field-label">Emoji {limits.pro ? "" : "· Pro"}</span>
+                      <input
+                        value={stop.emoji}
+                        maxLength={2}
+                        placeholder="🍜"
+                        onChange={(event) => {
+                          if (!limits.pro) {
+                            setLock("Emoji labels are a Pro feature.");
+                            return;
+                          }
+                          update((current) => ({
+                            ...current,
+                            stops: current.stops.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, emoji: event.target.value } : item
+                            ),
+                          }));
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {stop.photos.length > 0 ? (
+                    <div className="thumbs">
+                      {stop.photos.map((src, photoIndex) => (
+                        <figure key={src.slice(0, 32) + photoIndex}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={src} alt="" />
+                          <button
+                            type="button"
+                            aria-label="Remove photo"
+                            onClick={() =>
+                              update((current) => ({
+                                ...current,
+                                stops: current.stops.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? { ...item, photos: item.photos.filter((_, candidate) => candidate !== photoIndex) }
+                                    : item
+                                ),
+                              }))
+                            }
+                          >
+                            ×
+                          </button>
+                        </figure>
+                      ))}
+                    </div>
+                  ) : null}
+                  <label className="btn ghost wide sm file">
+                    ＋ Add photos for {stop.name}
                     <input
                       type="file"
                       accept="image/*"
@@ -548,55 +974,68 @@ export function Studio() {
               ))}
             </div>
           ) : null}
+
           {tab === "options" ? (
             <div className="side-body">
-              <p className="hint">These settings are the gear menu: globe, labels, camera, and format.</p>
-              <div className="theme-row">
-                {(Object.keys(THEMES) as ThemeId[]).map((theme) => (
-                  <button
-                    key={theme}
-                    className={project.style.theme === theme ? "theme on" : "theme"}
-                    onClick={() => update((current) => ({ ...current, style: { ...applyTheme(current.style, theme) } }))}
-                  >
-                    {THEMES[theme].label}
-                  </button>
-                ))}
+              <div className="option-group">
+                <span className="field-label">Map Theme</span>
+                <div className="theme-row">
+                  {(Object.keys(THEMES) as ThemeId[]).map((theme) => (
+                    <button
+                      type="button"
+                      key={theme}
+                      className={project.style.theme === theme ? "theme on" : "theme"}
+                      onClick={() => update((current) => ({ ...current, style: { ...applyTheme(current.style, theme) } }))}
+                    >
+                      <span
+                        className="theme-swatch"
+                        style={{
+                          background: `linear-gradient(135deg, ${THEMES[theme].ocean} 45%, ${THEMES[theme].land} 55%)`,
+                          borderColor: THEMES[theme].line,
+                        }}
+                      />
+                      {THEMES[theme].label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={project.style.highlightCountries}
-                  onChange={(event) => {
-                    if (!limits.customColors) return setLock("Country highlighting control is part of Pro.");
-                    update((current) => ({ ...current, style: { ...current.style, highlightCountries: event.target.checked } }));
-                  }}
-                />
-                Highlight visited countries
-              </label>
+
+              <div className="color-pickers-row">
+                <label className="field">
+                  <span className="field-label">Route color {limits.customColors ? "" : "· Pro"}</span>
+                  <div className="color-input-wrap">
+                    <input
+                      type="color"
+                      value={project.style.lineColor}
+                      onChange={(event) => {
+                        if (!limits.customColors) return setLock("Custom colors are part of Pro.");
+                        update((current) => ({ ...current, style: { ...current.style, lineColor: event.target.value } }));
+                      }}
+                    />
+                    <code>{project.style.lineColor}</code>
+                  </div>
+                </label>
+                <label className="field">
+                  <span className="field-label">Space backdrop {limits.customColors ? "" : "· Pro"}</span>
+                  <div className="color-input-wrap">
+                    <input
+                      type="color"
+                      value={project.style.background}
+                      onChange={(event) => {
+                        if (!limits.customColors) return setLock("Custom colors are part of Pro.");
+                        update((current) => ({ ...current, style: { ...current.style, background: event.target.value } }));
+                      }}
+                    />
+                    <code>{project.style.background}</code>
+                  </div>
+                </label>
+              </div>
+
               <label className="field">
-                Route color {limits.customColors ? "" : "· Pro"}
-                <input
-                  type="color"
-                  value={project.style.lineColor}
-                  onChange={(event) => {
-                    if (!limits.customColors) return setLock("Custom colors are part of Pro.");
-                    update((current) => ({ ...current, style: { ...current.style, lineColor: event.target.value } }));
-                  }}
-                />
-              </label>
-              <label className="field">
-                Background {limits.customColors ? "" : "· Pro"}
-                <input
-                  type="color"
-                  value={project.style.background}
-                  onChange={(event) => {
-                    if (!limits.customColors) return setLock("Custom colors are part of Pro.");
-                    update((current) => ({ ...current, style: { ...current.style, background: event.target.value } }));
-                  }}
-                />
-              </label>
-              <label className="field">
-                Speed {project.style.speed.toFixed(1)}×
+                <div className="range-header">
+                  <span className="field-label">Animation speed</span>
+                  <strong>{project.style.speed.toFixed(1)}×</strong>
+                </div>
                 <input
                   type="range"
                   min={0.6}
@@ -606,168 +1045,235 @@ export function Studio() {
                   onChange={(event) => update((current) => ({ ...current, style: { ...current.style, speed: Number(event.target.value) } }))}
                 />
               </label>
+
+              <div className="two-col-fields">
+                <label className="field">
+                  <span className="field-label">Distance counter</span>
+                  <select
+                    value={project.style.units}
+                    onChange={(event) =>
+                      update((current) => ({ ...current, style: { ...current.style, units: event.target.value as Project["style"]["units"] } }))
+                    }
+                  >
+                    <option value="km">Kilometers (km)</option>
+                    <option value="mi">Miles (mi)</option>
+                    <option value="none">Hidden</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="field-label">Place labels</span>
+                  <select
+                    value={project.style.labels}
+                    onChange={(event) =>
+                      update((current) => ({ ...current, style: { ...current.style, labels: event.target.value as Project["style"]["labels"] } }))
+                    }
+                  >
+                    <option value="current">Current stop</option>
+                    <option value="visited">Visited so far</option>
+                    <option value="always">Always visible</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="checks-card">
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={project.style.highlightCountries}
+                    onChange={(event) => {
+                      if (!limits.customColors) return setLock("Country highlighting control is part of Pro.");
+                      update((current) => ({ ...current, style: { ...current.style, highlightCountries: event.target.checked } }));
+                    }}
+                  />
+                  <span>Highlight visited countries</span>
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={project.style.optimizeLabels}
+                    onChange={(event) => update((current) => ({ ...current, style: { ...current.style, optimizeLabels: event.target.checked } }))}
+                  />
+                  <span>Hide overlapping labels</span>
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={project.style.startZoom}
+                    onChange={(event) => update((current) => ({ ...current, style: { ...current.style, startZoom: event.target.checked } }))}
+                  />
+                  <span>Starting camera zoom-in</span>
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={project.style.endZoom}
+                    onChange={(event) => update((current) => ({ ...current, style: { ...current.style, endZoom: event.target.checked } }))}
+                  />
+                  <span>Ending camera zoom-out</span>
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={project.style.showFullRouteAtEnd}
+                    onChange={(event) =>
+                      update((current) => ({ ...current, style: { ...current.style, showFullRouteAtEnd: event.target.checked } }))
+                    }
+                  />
+                  <span>Show full route at end</span>
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={project.style.showCountryFlags}
+                    onChange={(event) =>
+                      update((current) => ({ ...current, style: { ...current.style, showCountryFlags: event.target.checked } }))
+                    }
+                  />
+                  <span>Country names and flags</span>
+                </label>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={limits.pro ? project.style.showLogo : true}
+                    disabled={!limits.logoOptional}
+                    onChange={(event) => update((current) => ({ ...current, style: { ...current.style, showLogo: event.target.checked } }))}
+                  />
+                  <span>Show Meridian watermark {!limits.logoOptional ? "(Free)" : ""}</span>
+                </label>
+              </div>
+
+              <div className="side-divider" />
+
               <label className="field">
-                Distance
-                <select
-                  value={project.style.units}
-                  onChange={(event) =>
-                    update((current) => ({ ...current, style: { ...current.style, units: event.target.value as Project["style"]["units"] } }))
-                  }
-                >
-                  <option value="km">Kilometers</option>
-                  <option value="mi">Miles</option>
-                  <option value="none">Hidden</option>
-                </select>
-              </label>
-              <label className="field">
-                Place labels
-                <select
-                  value={project.style.labels}
-                  onChange={(event) =>
-                    update((current) => ({ ...current, style: { ...current.style, labels: event.target.value as Project["style"]["labels"] } }))
-                  }
-                >
-                  <option value="current">Current stop</option>
-                  <option value="visited">Visited so far</option>
-                  <option value="always">Always</option>
-                </select>
-              </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={project.style.optimizeLabels}
-                  onChange={(event) => update((current) => ({ ...current, style: { ...current.style, optimizeLabels: event.target.checked } }))}
-                />
-                Hide overlapping labels
-              </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={project.style.startZoom}
-                  onChange={(event) => update((current) => ({ ...current, style: { ...current.style, startZoom: event.target.checked } }))}
-                />
-                Starting zoom-in
-              </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={project.style.endZoom}
-                  onChange={(event) => update((current) => ({ ...current, style: { ...current.style, endZoom: event.target.checked } }))}
-                />
-                Ending zoom-out
-              </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={project.style.showFullRouteAtEnd}
-                  onChange={(event) =>
-                    update((current) => ({ ...current, style: { ...current.style, showFullRouteAtEnd: event.target.checked } }))
-                  }
-                />
-                Show the full route at the end
-              </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={project.style.showCountryFlags}
-                  onChange={(event) =>
-                    update((current) => ({ ...current, style: { ...current.style, showCountryFlags: event.target.checked } }))
-                  }
-                />
-                Country names and flags
-              </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={limits.pro ? project.style.showLogo : true}
-                  disabled={!limits.logoOptional}
-                  onChange={(event) => update((current) => ({ ...current, style: { ...current.style, showLogo: event.target.checked } }))}
-                />
-                Show Meridian logo {!limits.logoOptional ? "(required on Free)" : ""}
-              </label>
-              <label className="field">
-                Aspect ratio
+                <span className="field-label">Video aspect ratio</span>
                 <select
                   value={project.style.aspect}
                   onChange={(event) =>
                     update((current) => ({ ...current, style: { ...current.style, aspect: event.target.value as Project["style"]["aspect"] } }))
                   }
                 >
-                  <option value="16:9">16:9 YouTube</option>
-                  <option value="9:16">9:16 Reels, Shorts, TikTok</option>
-                  <option value="1:1">1:1 Square</option>
+                  <option value="16:9">16:9 Landscape (YouTube, Slides)</option>
+                  <option value="9:16">9:16 Vertical (Reels, Shorts, TikTok)</option>
+                  <option value="1:1">1:1 Square (Instagram, Feed)</option>
                 </select>
               </label>
-              <label className="field">
-                Resolution
-                <select
-                  value={limits.pro ? project.style.resolution : "768"}
-                  onChange={(event) => {
-                    if (event.target.value === "1080" && !limits.pro) return setLock("1080p is part of Pro.");
-                    update((current) => ({
-                      ...current,
-                      style: { ...current.style, resolution: event.target.value as Project["style"]["resolution"] },
-                    }));
-                  }}
-                >
-                  <option value="768">768p · 30 FPS</option>
-                  <option value="1080">1920p · up to 60 FPS</option>
-                </select>
-              </label>
-              <label className="field">
-                Frame rate
-                <select
-                  value={limits.pro ? String(project.style.fps) : "30"}
-                  onChange={(event) => {
-                    if (event.target.value === "60" && !limits.pro) return setLock("60 FPS is part of Pro.");
-                    update((current) => ({ ...current, style: { ...current.style, fps: Number(event.target.value) as 30 | 60 } }));
-                  }}
-                >
-                  <option value="30">30 FPS</option>
-                  <option value="60">60 FPS</option>
-                </select>
-              </label>
+
+              <div className="two-col-fields">
+                <label className="field">
+                  <span className="field-label">Resolution</span>
+                  <select
+                    value={limits.pro ? project.style.resolution : "768"}
+                    onChange={(event) => {
+                      if (event.target.value === "1080" && !limits.pro) return setLock("1080p is part of Pro.");
+                      update((current) => ({
+                        ...current,
+                        style: { ...current.style, resolution: event.target.value as Project["style"]["resolution"] },
+                      }));
+                    }}
+                  >
+                    <option value="768">768p HD</option>
+                    <option value="1080">1080p Full HD</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="field-label">Frame rate</span>
+                  <select
+                    value={limits.pro ? String(project.style.fps) : "30"}
+                    onChange={(event) => {
+                      if (event.target.value === "60" && !limits.pro) return setLock("60 FPS is part of Pro.");
+                      update((current) => ({ ...current, style: { ...current.style, fps: Number(event.target.value) as 30 | 60 } }));
+                    }}
+                  >
+                    <option value="30">30 FPS</option>
+                    <option value="60">60 FPS</option>
+                  </select>
+                </label>
+              </div>
             </div>
           ) : null}
+
           {tab === "music" ? (
             <div className="side-body">
-              <p className="hint">Tracks are synthesized in the browser and mixed into the export. They are original tones, not commercial songs.</p>
+              <p className="hint">
+                Synthesized ambient soundtracks are generated right in your browser and mixed into the video export.
+              </p>
               {!limits.music ? <p className="notice">Music is a Pro feature. Free exports stay silent.</p> : null}
-              {[
-                ["none", "No music"],
-                ["ambient", "Ambient"],
-                ["synthwave", "Synthwave"],
-                ["cinematic", "Cinematic"],
-                ["folk", "Folk"],
-              ].map(([id, label]) => (
-                <label key={id} className="check">
-                  <input
-                    type="radio"
-                    name="music"
-                    checked={project.style.music === id}
-                    onChange={() => {
-                      if (id !== "none" && !limits.music) return setLock("Music is included with Pro.");
-                      update((current) => ({ ...current, style: { ...current.style, music: id as Project["style"]["music"] } }));
-                    }}
-                  />
-                  {label}
-                </label>
-              ))}
+              <div className="music-list">
+                {[
+                  ["none", "🔇 No audio", "Silent video export"],
+                  ["ambient", "🌌 Ambient Drift", "Warm atmospheric pads"],
+                  ["synthwave", "🌆 Synthwave Pulse", "Retro driving arpeggio"],
+                  ["cinematic", "🎻 Cinematic Horizon", "Deep orchestral swells"],
+                  ["folk", "🪕 Acoustic Trail", "Light plucked melody"],
+                ].map(([id, label, desc]) => (
+                  <label key={id} className={`music-card ${project.style.music === id ? "on" : ""}`}>
+                    <input
+                      type="radio"
+                      name="music"
+                      checked={project.style.music === id}
+                      onChange={() => {
+                        if (id !== "none" && !limits.music) return setLock("Music is included with Pro.");
+                        update((current) => ({ ...current, style: { ...current.style, music: id as Project["style"]["music"] } }));
+                      }}
+                    />
+                    <div>
+                      <strong>{label}</strong>
+                      <small>{desc}</small>
+                    </div>
+                  </label>
+                ))}
+              </div>
             </div>
           ) : null}
         </aside>
+
         <div className="studio-map">
-          <MapEditor stops={project.stops} theme={project.style.theme} color={project.style.lineColor} onPick={addAt} />
-          <p className="map-caption">Click the map to drop the next stop. {summary}</p>
+          {stageMode === "map" ? (
+            <MapEditor
+              stops={project.stops}
+              legs={project.legs}
+              theme={project.style.theme}
+              color={project.style.lineColor}
+              onPick={addAt}
+              onRemove={removeStop}
+              onMove={moveStopTo}
+              onUpdateStop={updateStopCoord}
+              onClearAll={clearAllStops}
+            />
+          ) : (
+            <div className="studio-globe-stage">
+              <GlobeStage ref={inlineGlobe} project={project} pro={limits.pro} play="loop" />
+              <div className="globe-stage-controls">
+                <button type="button" className="map-ctrl-btn text" onClick={() => inlineGlobe.current?.play()}>
+                  ↻ Replay animation
+                </button>
+                <button type="button" className="map-ctrl-btn text" onClick={() => setStageMode("map")}>
+                  ✎ Back to 2D Map Editor
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {preview ? (
         <div className="modal" role="dialog" aria-modal="true" aria-label="Preview">
           <div className="modal-card">
-            <header>
-              <strong>{project.title}</strong>
-              <button className="icon-btn bare" onClick={() => { globe.current?.pause(); setPreview(false); }}>
+            <header className="modal-header">
+              <div>
+                <strong>{project.title}</strong>
+                <span className="modal-sub">
+                  {project.stops.length} stops · {project.style.aspect} · {project.style.resolution}p @ {project.style.fps}fps
+                </span>
+              </div>
+              <button
+                className="icon-btn bare"
+                aria-label="Close preview"
+                onClick={() => {
+                  globe.current?.pause();
+                  setPreview(false);
+                }}
+              >
                 ×
               </button>
             </header>
@@ -780,16 +1286,16 @@ export function Studio() {
             />
             <div className="modal-actions">
               <button className="btn ghost" onClick={() => globe.current?.play()} disabled={exporting}>
-                Replay
+                ↻ Replay
               </button>
               <button className="btn ghost" onClick={share}>
-                Copy share link
+                🔗 Copy share link
               </button>
               <button className="btn primary" onClick={renderVideo} disabled={exporting}>
-                {exporting ? `Rendering ${Math.round(progress * 100)}%` : "Download video"}
+                {exporting ? `Rendering ${Math.round(progress * 100)}%…` : "⬇ Download WebM video"}
               </button>
             </div>
-            <p className="hint">Download records a free WebM of this preview.</p>
+            <p className="hint">Records a high-definition WebM video of this 3D globe animation directly in your browser.</p>
           </div>
         </div>
       ) : null}

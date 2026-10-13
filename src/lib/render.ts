@@ -233,15 +233,27 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-function drawStars(ctx: CanvasRenderingContext2D, w: number, h: number) {
+function drawStars(ctx: CanvasRenderingContext2D, w: number, h: number, time = 0) {
+  // Subtle cosmic nebula glow
+  const neb1 = ctx.createRadialGradient(w * 0.22, h * 0.25, 10, w * 0.22, h * 0.25, w * 0.55);
+  neb1.addColorStop(0, "rgba(56, 189, 248, 0.09)");
+  neb1.addColorStop(0.5, "rgba(99, 102, 241, 0.04)");
+  neb1.addColorStop(1, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = neb1;
+  ctx.fillRect(0, 0, w, h);
+
   let s = 42;
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 110; i++) {
     s = (s * 16807) % 2147483647;
     const x = (s % 1000) / 1000;
     s = (s * 16807) % 2147483647;
     const y = (s % 1000) / 1000;
-    ctx.fillStyle = `rgba(255,255,255,${0.25 + (i % 5) * 0.1})`;
-    ctx.fillRect(x * w, y * h, i % 4 === 0 ? 1.6 : 1, i % 4 === 0 ? 1.6 : 1);
+    const twinkle = 0.3 + 0.35 * Math.sin(time * 1.8 + i * 1.7);
+    const radius = i % 9 === 0 ? 1.5 : i % 3 === 0 ? 1.05 : 0.7;
+    ctx.beginPath();
+    ctx.arc(x * w, y * h, radius, 0, Math.PI * 2);
+    ctx.fillStyle = i % 11 === 0 ? `rgba(125, 211, 252, ${twinkle + 0.2})` : `rgba(255, 255, 255, ${twinkle})`;
+    ctx.fill();
   }
 }
 
@@ -254,7 +266,7 @@ export function drawFrame(
   time: number
 ) {
   const { w, h } = { w: ctx.canvas.width, h: ctx.canvas.height };
-  const palette = THEMES[project.style.theme];
+  const palette = THEMES[project.style.theme] ?? THEMES.earth;
   const frame = frameAt(project, paths, time);
   const bg = project.style.background || palette.bg;
   const line = project.style.lineColor || palette.line;
@@ -263,19 +275,57 @@ export function drawFrame(
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, w, h);
-  if (palette.stars) drawStars(ctx, w, h);
+  if (palette.stars) drawStars(ctx, w, h, time);
+
+  const cx = w / 2;
+  const cy = h / 2 + h * 0.02;
+  const globeRadius = frame.camera.factor * Math.min(w, h);
 
   const projection = geoOrthographic()
     .precision(0.4)
     .rotate([-frame.camera.lon, -frame.camera.lat])
-    .translate([w / 2, h / 2 + h * 0.02])
-    .scale(frame.camera.factor * Math.min(w, h));
+    .translate([cx, cy])
+    .scale(globeRadius);
   const path = geoPath(projection, ctx);
 
+  // Outer atmospheric corona glow around the 3D globe
+  if (palette.stars) {
+    const corona = ctx.createRadialGradient(cx, cy, globeRadius * 0.88, cx, cy, globeRadius * 1.22);
+    corona.addColorStop(0, "rgba(56, 189, 248, 0.28)");
+    corona.addColorStop(0.45, "rgba(37, 99, 235, 0.12)");
+    corona.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = corona;
+    ctx.beginPath();
+    ctx.arc(cx, cy, globeRadius * 1.22, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 3D Ocean Sphere with sunlit specular gradient
   ctx.beginPath();
   path({ type: "Sphere" } as never);
   ctx.fillStyle = palette.ocean;
   ctx.fill();
+
+  if (palette.stars) {
+    ctx.save();
+    ctx.beginPath();
+    path({ type: "Sphere" } as never);
+    ctx.clip();
+    const oceanLight = ctx.createRadialGradient(
+      cx - globeRadius * 0.32,
+      cy - globeRadius * 0.32,
+      globeRadius * 0.05,
+      cx,
+      cy,
+      globeRadius * 1.05
+    );
+    oceanLight.addColorStop(0, "rgba(125, 211, 252, 0.26)");
+    oceanLight.addColorStop(0.55, "rgba(14, 165, 233, 0.05)");
+    oceanLight.addColorStop(1, "rgba(2, 6, 23, 0.55)");
+    ctx.fillStyle = oceanLight;
+    ctx.fillRect(cx - globeRadius - 4, cy - globeRadius - 4, globeRadius * 2 + 8, globeRadius * 2 + 8);
+    ctx.restore();
+  }
 
   const visited = new Set(
     project.stops
@@ -291,21 +341,36 @@ export function drawFrame(
     const hot = country.code && visited.has(country.code);
     ctx.fillStyle = hot ? palette.landHi : palette.land;
     ctx.fill();
-    ctx.lineWidth = Math.max(0.4, w / 1800);
+    ctx.lineWidth = Math.max(0.45, w / 1600);
     ctx.strokeStyle = palette.border;
     ctx.stroke();
   });
 
   ctx.beginPath();
   path(geoGraticule()());
-  ctx.strokeStyle = palette.stars ? "rgba(255,255,255,0.08)" : "rgba(30,40,50,0.08)";
+  ctx.strokeStyle = palette.stars ? "rgba(255,255,255,0.07)" : "rgba(30,40,50,0.08)";
   ctx.lineWidth = 0.6;
   ctx.stroke();
 
+  // 3D Spherical inner rim glow & limb shadow
+  if (palette.stars) {
+    ctx.save();
+    ctx.beginPath();
+    path({ type: "Sphere" } as never);
+    ctx.clip();
+    const rim = ctx.createRadialGradient(cx, cy, globeRadius * 0.78, cx, cy, globeRadius);
+    rim.addColorStop(0, "rgba(0,0,0,0)");
+    rim.addColorStop(0.82, "rgba(2, 6, 23, 0.18)");
+    rim.addColorStop(1, "rgba(56, 189, 248, 0.32)");
+    ctx.fillStyle = rim;
+    ctx.fillRect(cx - globeRadius - 2, cy - globeRadius - 2, globeRadius * 2 + 4, globeRadius * 2 + 4);
+    ctx.restore();
+  }
+
   ctx.beginPath();
   path({ type: "Sphere" } as never);
-  ctx.strokeStyle = palette.stars ? "rgba(255,255,255,0.35)" : "rgba(40,50,60,0.28)";
-  ctx.lineWidth = Math.max(1.2, w / 700);
+  ctx.strokeStyle = palette.stars ? "rgba(125, 211, 252, 0.45)" : "rgba(40,50,60,0.28)";
+  ctx.lineWidth = Math.max(1.5, w / 640);
   ctx.stroke();
 
   const strokeRoute = (lines: [number, number][][], alpha: number, width: number, dash: boolean) => {
@@ -327,17 +392,24 @@ export function drawFrame(
     ctx.restore();
   };
 
-  strokeRoute(frame.full, frame.showUnderlay, Math.max(1.5, w / 520), false);
-  strokeRoute(frame.revealed, 1, Math.max(2.4, w / 340), frame.dashed);
+  strokeRoute(frame.full, frame.showUnderlay, Math.max(1.6, w / 480), false);
+  strokeRoute(frame.revealed, 1, Math.max(2.8, w / 300), frame.dashed);
 
-  project.stops.forEach((stop) => {
+  project.stops.forEach((stop, idx) => {
     const xy = projection([stop.lon, stop.lat]);
     if (!xy) return;
+    const r = Math.max(4, w / 250);
+    const pulse = 1 + 0.35 * Math.sin(time * 4 + idx);
     ctx.beginPath();
-    ctx.arc(xy[0], xy[1], Math.max(3.5, w / 280), 0, Math.PI * 2);
+    ctx.arc(xy[0], xy[1], r * 2.1 * pulse, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(56, 189, 248, 0.22)";
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(xy[0], xy[1], r, 0, Math.PI * 2);
     ctx.fillStyle = "#fff";
     ctx.fill();
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.2;
     ctx.strokeStyle = line;
     ctx.stroke();
   });
@@ -364,18 +436,25 @@ export function drawFrame(
     const flag = project.style.showCountryFlags && stop.code ? flagEmoji(stop.code) : "";
     const primary = `${stop.emoji ? `${stop.emoji} ` : ""}${stop.name}`;
     const secondary = [flag, stop.country].filter(Boolean).join(" ");
-    const font = Math.max(13, w / 62);
+    const font = Math.max(13, w / 60);
     ctx.font = `600 ${font}px Inter, sans-serif`;
-    const width = Math.max(ctx.measureText(primary).width, secondary ? ctx.measureText(secondary).width * 0.82 : 0) + 18;
-    const height = secondary ? font * 2.5 : font * 1.7;
+    const width = Math.max(ctx.measureText(primary).width, secondary ? ctx.measureText(secondary).width * 0.82 : 0) + 22;
+    const height = secondary ? font * 2.55 : font * 1.75;
     const x = xy[0] - width / 2;
-    const y = xy[1] - height - Math.max(12, w / 80);
+    const y = xy[1] - height - Math.max(14, w / 76);
     const rect = { x, y, w: width, h: height };
     if (project.style.optimizeLabels && taken.some((box) => intersects(box, rect))) return;
     taken.push(rect);
-    ctx.fillStyle = palette.stars ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.82)";
-    roundRect(ctx, x, y, width, height, 8);
+    ctx.save();
+    ctx.fillStyle = palette.stars ? "rgba(10, 16, 30, 0.82)" : "rgba(255, 255, 255, 0.90)";
+    ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+    ctx.shadowBlur = 10;
+    roundRect(ctx, x, y, width, height, 10);
     ctx.fill();
+    ctx.strokeStyle = palette.stars ? "rgba(125, 211, 252, 0.35)" : "rgba(15, 23, 42, 0.16)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
     ctx.fillStyle = label;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
