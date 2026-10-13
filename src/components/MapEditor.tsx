@@ -847,8 +847,8 @@ export function MapEditor({
           style={
             selectedPinPosition
               ? {
-                  left: `${Math.max(140, Math.min((wrapRef.current?.clientWidth || 600) - 140, selectedPinPosition.x))}px`,
-                  top: `${Math.max(72, selectedPinPosition.y - 52)}px`,
+                  left: `${Math.max(120, Math.min(Math.max(120, (wrapRef.current?.clientWidth || 360) - 120), selectedPinPosition.x))}px`,
+                  top: `${Math.max(76, Math.min(Math.max(76, (wrapRef.current?.clientHeight || 320) - 16), selectedPinPosition.y - 44))}px`,
                 }
               : undefined
           }
