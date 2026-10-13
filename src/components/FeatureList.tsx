@@ -45,9 +45,6 @@ export function FeatureList() {
                 </div>
               </div>
               <div className="article-body">
-                <small>
-                  {article.author} · {article.date}
-                </small>
                 <h2>{article.title}</h2>
                 <p>{article.excerpt}</p>
                 <span className="article-read-more">Read guide →</span>

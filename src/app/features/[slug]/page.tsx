@@ -22,7 +22,7 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
     <PageShell>
       <article className="article">
         <p className="meta">
-          <Link href="/features">Features</Link> · {article.author} · {article.date}
+          <Link href="/features">← Features</Link>
         </p>
         <div className="cover" style={{ background: article.cover }} />
         <h1>{article.title}</h1>
