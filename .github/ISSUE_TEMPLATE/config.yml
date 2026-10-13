@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Live Meridian Studio
+    url: https://meridian.meetsid.dev/
+    about: Open the live Meridian app to create and export 3D travel map animations
+  - name: Support & Feature Guides
+    url: https://meridian.meetsid.dev/support
+    about: Read FAQs and step-by-step guides before opening an issue

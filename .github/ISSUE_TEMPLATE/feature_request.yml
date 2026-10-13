@@ -1,0 +1,37 @@
+name: Feature Request
+description: Suggest a new feature, transport mode, globe theme, or improvement for Meridian
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea to make Meridian better? Tell us about it below!
+  - type: textarea
+    id: idea
+    attributes:
+      label: Feature Description
+      description: What would you like to see added or improved?
+      placeholder: Describe the feature or enhancement...
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - New Transport Mode / Vehicle Icon
+        - New Cartographic Theme / Map Styling
+        - Camera / Animation Controls
+        - Soundtrack / Sound Effects
+        - Import / Export Formats
+        - UI / Workflow Improvement
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use Case / Why is this useful?
+      description: How would this help your travel map videos or workflow?
+      placeholder: "e.g., I'm mapping a ski trip and would love a gondola/ski transport icon..."

@@ -1,0 +1,54 @@
+name: Bug Report
+description: Report a bug, rendering issue, or routing problem in Meridian
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue with Meridian!
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the problem.
+      placeholder: Describe what went wrong...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the issue?
+      placeholder: |
+        1. Open Route Studio and add stops...
+        2. Select transport mode...
+        3. Click Preview / Export...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area of the App
+      options:
+        - 2D Map Editor / Stop Search
+        - 3D Globe / Camera Animation
+        - Video / GIF Export
+        - Audio / Soundtracks / Transport SFX
+        - GPX / KML / GeoJSON / Maps URL Import
+        - Cross-Device Sync / Google Sign-In
+        - Mobile / PWA
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser & Device
+      description: Which browser and OS are you using?
+      placeholder: "e.g., Chrome 135 on macOS, Safari on iOS 18"
+  - type: textarea
+    id: context
+    attributes:
+      label: Route Link or Screenshots (Optional)
+      description: Paste a shared Meridian route link (`/r/...`) or attach screenshots if helpful.
