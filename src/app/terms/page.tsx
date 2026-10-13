@@ -31,7 +31,7 @@ const SECTIONS = [
   {
     num: "02",
     title: "Free Access & Account Usage",
-    body: "Meridian is provided free of charge. After signing in with Google, every transport mode, globe theme, GPX/KML/GeoJSON import, and high-definition export is unlocked without watermarks, recurring subscriptions, or paid video credits.",
+    body: "Meridian is provided completely free of charge with no paid tiers, recurring subscriptions, or credit packs. After signing in with Google, every transport mode, globe theme, GPX/KML/GeoJSON import, and high-definition export is available out of the box, and the Meridian corner watermark can be toggled on or off freely in the Studio.",
   },
   {
     num: "03",

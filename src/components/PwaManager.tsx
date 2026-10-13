@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -8,60 +9,75 @@ interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
 }
 
-type PwaContextValue = {
-  isStandalone: boolean;
-  canInstall: boolean;
-  isIos: boolean;
-  showIosModal: boolean;
-  setShowIosModal: (open: boolean) => void;
-  triggerInstall: () => Promise<void>;
-};
+const DISMISS_KEY = "meridian-pwa-banner-dismissed";
+const DISMISS_DAYS = 7;
 
-const PwaContext = createContext<PwaContextValue>({
-  isStandalone: false,
-  canInstall: false,
-  isIos: false,
-  showIosModal: false,
-  setShowIosModal: () => {},
-  triggerInstall: async () => {},
-});
+function isBannerDismissed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const raw = localStorage.getItem(DISMISS_KEY);
+    if (!raw) return false;
+    const until = Number(raw);
+    return Number.isFinite(until) && Date.now() < until;
+  } catch {
+    return false;
+  }
+}
 
-export function usePwa() {
-  return useContext(PwaContext);
+function dismissBannerForWeek() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(DISMISS_KEY, String(Date.now() + DISMISS_DAYS * 86_400_000));
+  } catch {
+    // ignore storage errors
+  }
 }
 
 export function PwaProvider({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n();
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isStandalone, setIsStandalone] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(true);
+  const [isMobile, setIsMobile] = useState(false);
   const [isIos, setIsIos] = useState(false);
-  const [showIosModal, setShowIosModal] = useState(false);
+  const [dismissed, setDismissed] = useState(true);
+  const [showIosGuide, setShowIosGuide] = useState(false);
   const [updateToast, setUpdateToast] = useState(false);
   const refreshingRef = useRef(false);
 
-  // Detect standalone mode & iOS Safari
+  // Detect mobile device, standalone mode, and beforeinstallprompt
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const checkStandalone = () => {
+    const checkEnvironment = () => {
       const standalone =
         window.matchMedia("(display-mode: standalone)").matches ||
         Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
       setIsStandalone(standalone);
+
+      const ua = window.navigator.userAgent || "";
+      const iosDevice =
+        /iPad|iPhone|iPod/.test(ua) ||
+        (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
+      setIsIos(iosDevice);
+
+      const mobileUa = /Android|iPhone|iPad|iPod|Mobile|Opera Mini|IEMobile/i.test(ua) || iosDevice;
+      const mobileViewport = window.matchMedia("(max-width: 820px) and (pointer: coarse)").matches;
+      setIsMobile(mobileUa || mobileViewport);
     };
 
-    checkStandalone();
-
-    const ua = window.navigator.userAgent || "";
-    const iosDevice =
-      /iPad|iPhone|iPod/.test(ua) ||
-      (window.navigator.platform === "MacIntel" && window.navigator.maxTouchPoints > 1);
-    setIsIos(iosDevice);
+    checkEnvironment();
+    setDismissed(isBannerDismissed());
 
     const mediaQuery = window.matchMedia("(display-mode: standalone)");
-    const onChange = () => checkStandalone();
+    const onChange = () => checkEnvironment();
     mediaQuery.addEventListener?.("change", onChange);
 
     const onBeforeInstallPrompt = (e: Event) => {
+      const ua = window.navigator.userAgent || "";
+      const isMobileDevice =
+        /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+        window.matchMedia("(max-width: 820px) and (pointer: coarse)").matches;
+      if (!isMobileDevice) return;
       e.preventDefault();
       setDeferredPrompt(e as BeforeInstallPromptEvent);
     };
@@ -69,7 +85,7 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
     const onAppInstalled = () => {
       setDeferredPrompt(null);
       setIsStandalone(true);
-      setShowIosModal(false);
+      setShowIosGuide(false);
     };
 
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
@@ -119,7 +135,6 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
           });
         });
 
-        // Periodically check for updates every 5 minutes and whenever tab regains focus
         updateInterval = setInterval(() => {
           registration.update().catch(() => {});
         }, 5 * 60 * 1000);
@@ -141,38 +156,38 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const triggerInstall = useCallback(async () => {
+  const handleInstallClick = useCallback(async () => {
     if (deferredPrompt) {
       await deferredPrompt.prompt();
       try {
         const choice = await deferredPrompt.userChoice;
         if (choice.outcome === "accepted") {
           setDeferredPrompt(null);
+          setIsStandalone(true);
+        } else {
+          dismissBannerForWeek();
+          setDismissed(true);
         }
       } catch {
         // user dismissed
       }
       return;
     }
-    setShowIosModal(true);
-  }, [deferredPrompt]);
+    if (isIos) {
+      setShowIosGuide((prev) => !prev);
+    }
+  }, [deferredPrompt, isIos]);
 
-  const canInstall = !isStandalone && (Boolean(deferredPrompt) || isIos);
+  const handleDismiss = useCallback(() => {
+    dismissBannerForWeek();
+    setDismissed(true);
+    setShowIosGuide(false);
+  }, []);
 
-  const value = useMemo<PwaContextValue>(
-    () => ({
-      isStandalone,
-      canInstall,
-      isIos,
-      showIosModal,
-      setShowIosModal,
-      triggerInstall,
-    }),
-    [isStandalone, canInstall, isIos, showIosModal, triggerInstall]
-  );
+  const showMobilePrompt = isMobile && !isStandalone && !dismissed && (Boolean(deferredPrompt) || isIos);
 
   return (
-    <PwaContext.Provider value={value}>
+    <>
       {children}
 
       {updateToast ? (
@@ -181,62 +196,51 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
         </div>
       ) : null}
 
-      {showIosModal ? (
-        <div className="pwa-modal-backdrop" onClick={() => setShowIosModal(false)}>
-          <div
-            className="pwa-modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="pwa-install-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="pwa-modal-head">
-              <strong id="pwa-install-title">📲 Install Meridian as an App</strong>
+      {showMobilePrompt ? (
+        <div className="pwa-mobile-sheet" role="region" aria-label={t("installApp")}>
+          <div className="pwa-mobile-sheet-row">
+            <img
+              src="/icon.svg"
+              alt=""
+              width={40}
+              height={40}
+              className="pwa-mobile-sheet-icon"
+            />
+            <div className="pwa-mobile-sheet-copy">
+              <strong>Meridian</strong>
+              <span>Install app for full-screen 3D route studio</span>
+            </div>
+            <div className="pwa-mobile-sheet-actions">
               <button
                 type="button"
-                className="action-btn"
-                aria-label="Close"
-                onClick={() => setShowIosModal(false)}
+                className="btn primary sm"
+                onClick={() => void handleInstallClick()}
+              >
+                {showIosGuide ? "Done" : "Install"}
+              </button>
+              <button
+                type="button"
+                className="pwa-mobile-sheet-close"
+                aria-label="Dismiss install banner"
+                onClick={handleDismiss}
               >
                 ×
               </button>
             </div>
-            {isIos ? (
-              <div className="pwa-modal-steps">
-                <p>Install Meridian on your iPhone or iPad for a full-screen studio experience:</p>
-                <ol>
-                  <li>
-                    Tap the <strong>Share</strong> button <span className="pwa-kbd">⎋</span> in Safari’s toolbar.
-                  </li>
-                  <li>
-                    Scroll down and tap <strong>Add to Home Screen</strong> <span className="pwa-kbd">＋</span>.
-                  </li>
-                  <li>
-                    Tap <strong>Add</strong> in the top-right corner.
-                  </li>
-                </ol>
-              </div>
-            ) : (
-              <div className="pwa-modal-steps">
-                <p>To install Meridian as a standalone app on your device:</p>
-                <ol>
-                  <li>
-                    Open your browser’s address bar or menu (<span className="pwa-kbd">⋮</span>).
-                  </li>
-                  <li>
-                    Select <strong>Install app</strong> or <strong>Add to Home screen</strong>.
-                  </li>
-                </ol>
-              </div>
-            )}
-            <div className="pwa-modal-actions">
-              <button type="button" className="btn primary sm" onClick={() => setShowIosModal(false)}>
-                Got it
-              </button>
-            </div>
           </div>
+
+          {showIosGuide && isIos ? (
+            <div className="pwa-ios-inline-steps">
+              <span>
+                1. Tap <strong>Share</strong> <kbd className="pwa-kbd">⎋</kbd> in Safari
+              </span>
+              <span>
+                2. Tap <strong>Add to Home Screen</strong> <kbd className="pwa-kbd">＋</kbd>
+              </span>
+            </div>
+          ) : null}
         </div>
       ) : null}
-    </PwaContext.Provider>
+    </>
   );
 }

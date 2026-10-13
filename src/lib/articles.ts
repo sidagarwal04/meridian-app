@@ -91,16 +91,16 @@ export const ARTICLES: Article[] = [
   },
   {
     slug: "packages",
-    title: "Free, with a Google sign-in",
-    excerpt: "Sign in with Google. Every export, transport, and style is included.",
+    title: "100% Free, with Google Sign-In",
+    excerpt: "No tiers, no credit packs, and no subscriptions — every feature is included.",
     date: "December 5, 2025",
     author: "Meridian",
     tags: ["FAQ", "Comparison"],
     cover: "linear-gradient(160deg, #202124, #1a73e8)",
     body: [
-      "Sign in with Google, then create as many videos as you want. Preview and download do not spend a credit.",
-      "A route can hold 100 places and 100 photos. Exports can be 1080p at 60 frames per second, with the Meridian mark turned off.",
-      "Airplane, road, rail, and sea icons, file import, custom colors, and music are included. Nothing on the pricing page is a paid pack.",
+      "Meridian has no paid tiers or credit packs. Sign in with Google and create or export as many videos as you want.",
+      "A route can hold up to 100 places and 100 photos. Exports support 1080p at 60 frames per second, and the Meridian corner watermark can be kept on or turned off in Options.",
+      "All 12 air, land, and sea transport modes, GPX/KML/GeoJSON imports, custom colors, and procedural soundtracks are included for everyone.",
     ],
   },
   {
