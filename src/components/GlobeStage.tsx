@@ -224,7 +224,7 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
       music: curShown.style.music,
       soundEffects: curShown.style.soundEffects ?? true,
     }).then((session) => {
-      if (!playing.current || recording.current) {
+      if (!playing.current || recording.current || !enableAudioRef.current) {
         session?.stop();
         return;
       }

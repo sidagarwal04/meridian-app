@@ -62,7 +62,7 @@ export default function Page() {
         <div className="library-header">
           <div>
             <span className="hero-badge">
-              <span className="badge-dot" /> Personal Studio Library
+              <span className="badge-dot" /> Route Studio Library
             </span>
             <h1 style={{ textAlign: "left", margin: "10px 0 6px" }}>{t("myVideos")}</h1>
             <p className="library-sub">

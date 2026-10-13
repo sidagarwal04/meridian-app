@@ -653,6 +653,10 @@ export function Studio() {
             className={stageMode === "globe" ? "active" : ""}
             onClick={() => {
               unlockAudio();
+              if (musicTimer.current) clearTimeout(musicTimer.current);
+              musicStopRef.current?.();
+              musicStopRef.current = null;
+              setPreviewingMusic(null);
               setStageMode("globe");
             }}
           >
@@ -675,6 +679,11 @@ export function Studio() {
             className="btn primary sm"
             onClick={() => {
               unlockAudio();
+              if (musicTimer.current) clearTimeout(musicTimer.current);
+              musicStopRef.current?.();
+              musicStopRef.current = null;
+              setPreviewingMusic(null);
+              inlineGlobe.current?.pause();
               setPreview(true);
             }}
           >
@@ -1652,7 +1661,13 @@ export function Studio() {
             />
           ) : (
             <div className={`studio-globe-stage aspect-${project.style.aspect.replace(":", "-")}`}>
-              <GlobeStage ref={inlineGlobe} project={project} pro={limits.pro} play="loop" enableAudio={stageAudio} />
+              <GlobeStage
+                ref={inlineGlobe}
+                project={project}
+                pro={limits.pro}
+                play={preview ? "idle" : "loop"}
+                enableAudio={stageAudio && !preview}
+              />
               <div className="globe-stage-controls">
                 <div className="stage-aspect-pills" role="group" aria-label="Layout aspect ratio">
                   {(["16:9", "9:16", "1:1"] as const).map((ratio) => (
