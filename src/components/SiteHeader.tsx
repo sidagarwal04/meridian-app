@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useAuth } from "./AuthProvider";
 import { Logo } from "./Logo";
 import { usePwa } from "./PwaManager";
+import { GITHUB_ISSUES_URL, GITHUB_REPO_URL } from "./SiteFooter";
 import { useI18n } from "@/lib/i18n";
 
 export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
@@ -89,9 +90,22 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
           <Link href="/support" onClick={() => setOpen(false)}>
             🛟 {t("support")}
           </Link>
-          <Link href="/contacts" onClick={() => setOpen(false)}>
-            ✉️ {t("contacts")}
-          </Link>
+          <a
+            href={GITHUB_ISSUES_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setOpen(false)}
+          >
+            💡 {t("issuesFeatures")}
+          </a>
+          <a
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setOpen(false)}
+          >
+            🐙 GitHub
+          </a>
           {!isStandalone ? (
             <button
               type="button"

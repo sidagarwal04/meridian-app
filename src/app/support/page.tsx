@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageShell } from "@/components/PageShell";
+import { GITHUB_ISSUES_URL, GITHUB_REPO_URL } from "@/components/SiteFooter";
 
 export const metadata: Metadata = { title: "Support" };
 
@@ -54,11 +55,16 @@ export default function Page() {
             <h3>Importing GPX, KML &amp; Maps</h3>
             <p>Bring in recorded GPS tracks or paste Google Maps directions links automatically.</p>
           </Link>
-          <Link href="/contacts" className="feature-highlight-card">
-            <span className="feature-icon">✉️</span>
-            <h3>Leave a Support Note</h3>
-            <p>Have a question about a specific route or browser export? Send us a note.</p>
-          </Link>
+          <a
+            href={GITHUB_ISSUES_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="feature-highlight-card"
+          >
+            <span className="feature-icon">💡</span>
+            <h3>Report an Issue or Request a Feature</h3>
+            <p>Found a bug or have an idea for Meridian? Open an issue or feature request on GitHub with our templates.</p>
+          </a>
         </div>
 
         <div className="faq">
@@ -70,11 +76,19 @@ export default function Page() {
           ))}
         </div>
 
-        <p className="center" style={{ marginTop: 32 }}>
+        <div className="hero-actions" style={{ justifyContent: "center", marginTop: 32 }}>
           <Link className="btn ghost lg" href="/features">
             Read all feature guides →
           </Link>
-        </p>
+          <a
+            className="btn ghost lg"
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            🐙 View on GitHub →
+          </a>
+        </div>
       </div>
     </PageShell>
   );
