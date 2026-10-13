@@ -6,7 +6,7 @@ import { GlobeStage } from "./GlobeStage";
 import { PageShell } from "./PageShell";
 import { TEMPLATES } from "@/lib/templates";
 import { THEMES, applyTheme, transportMeta, type ThemeId } from "@/lib/types";
-import { flagEmoji, haversineKm } from "@/lib/geo";
+import { countVisitedPlaces, flagEmoji, haversineKm } from "@/lib/geo";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "./AuthProvider";
 
@@ -93,7 +93,7 @@ export function ExamplesView() {
 
               <div className="theater-stats">
                 <div>
-                  <strong>{activeProject.stops.length}</strong>
+                  <strong>{countVisitedPlaces(activeProject.stops)}</strong>
                   <span>Places</span>
                 </div>
                 <div>

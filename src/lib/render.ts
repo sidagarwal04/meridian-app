@@ -1,5 +1,5 @@
 import { geoGraticule, geoOrthographic, geoPath, type GeoProjection } from "d3-geo";
-import { flagEmoji, pathKm, pointAlong, slicePath } from "./geo";
+import { countVisitedPlaces, flagEmoji, pathKm, pointAlong, slicePath } from "./geo";
 import { drawShaderGlobe } from "./globeShader";
 import { THEMES, transportMeta, type Project, type Style, type ThemeId, type Transport } from "./types";
 import type { CountryShape } from "./world";
@@ -1106,7 +1106,8 @@ export function drawFrame(
         : Math.round(frame.totalDistanceKm);
     const unitLabel = project.style.units === "mi" ? "mi" : "km";
     const valueText = `${totalVal.toLocaleString()} ${unitLabel}`;
-    const captionText = `TOTAL DISTANCE · ${project.stops.length} ${project.stops.length === 1 ? "PLACE" : "PLACES"}`;
+    const visitedCount = countVisitedPlaces(project.stops);
+    const captionText = `TOTAL DISTANCE · ${visitedCount} ${visitedCount === 1 ? "PLACE" : "PLACES"}`;
 
     const bigFont = Math.round(Math.max(18, w / 34));
     const capFont = Math.round(Math.max(10, w / 76));

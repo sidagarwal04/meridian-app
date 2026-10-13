@@ -169,3 +169,38 @@ export function flagEmoji(code: string) {
     .toUpperCase()
     .replace(/./g, (char) => String.fromCodePoint(127397 + char.charCodeAt(0)));
 }
+
+export function isSamePlace(
+  a: { name?: string; country?: string; lat: number; lon: number },
+  b: { name?: string; country?: string; lat: number; lon: number }
+): boolean {
+  const nameA = a.name?.trim().toLowerCase() || "";
+  const nameB = b.name?.trim().toLowerCase() || "";
+  if (nameA && nameB && nameA !== "pinned place" && nameA === nameB) {
+    const countryA = a.country?.trim().toLowerCase() || "";
+    const countryB = b.country?.trim().toLowerCase() || "";
+    if (!countryA || !countryB || countryA === countryB) return true;
+  }
+  return haversineKm(a, b) <= 35;
+}
+
+/**
+ * Counts destinations visited along a route:
+ * - Start location (stops[0]) is the departure origin and is not counted as a visited destination.
+ * - Any subsequent stop that returns to the start location (e.g. round-trip end) is also excluded.
+ * - All legs' distances are still counted separately in full.
+ */
+export function countVisitedPlaces(
+  stops: { name?: string; country?: string; lat: number; lon: number }[]
+): number {
+  if (stops.length <= 1) return stops.length;
+  const start = stops[0];
+  let visited = 0;
+  for (let i = 1; i < stops.length; i++) {
+    if (!isSamePlace(start, stops[i])) {
+      visited++;
+    }
+  }
+  return visited;
+}
+

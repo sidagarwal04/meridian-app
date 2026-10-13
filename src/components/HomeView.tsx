@@ -6,7 +6,7 @@ import { PageShell } from "./PageShell";
 import { GlobeStage } from "./GlobeStage";
 import { HERO_PROJECT, TEMPLATES } from "@/lib/templates";
 import { THEMES, applyTheme, transportMeta, type ThemeId } from "@/lib/types";
-import { flagEmoji, haversineKm } from "@/lib/geo";
+import { countVisitedPlaces, flagEmoji, haversineKm } from "@/lib/geo";
 import { useAuth } from "./AuthProvider";
 import { useI18n } from "@/lib/i18n";
 
@@ -130,7 +130,8 @@ export function HomeView() {
             />
             <div className="hero-globe-overlay-top">
               <span className="telemetry-pill">
-                📍 {liveProject.stops.length} stops · {routeDistanceKm.toLocaleString()} km
+                📍 {countVisitedPlaces(liveProject.stops)}{" "}
+                {countVisitedPlaces(liveProject.stops) === 1 ? "place" : "places"} · {routeDistanceKm.toLocaleString()} km
               </span>
               <span className="telemetry-pill">
                 {transportMeta(liveProject.legs[0]?.transport ?? "plane").icon}{" "}

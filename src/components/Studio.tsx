@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { searchCities } from "@/lib/cities";
-import { flagEmoji, haversineKm, nearestCity } from "@/lib/geo";
+import { countVisitedPlaces, flagEmoji, haversineKm, nearestCity } from "@/lib/geo";
 import { parseGeoJson, parseGpx, parseItinerary, parseKml, placesFromGoogleUrl, simplifyTrack } from "@/lib/parse";
 import { encodeRoute } from "@/lib/share";
 import { TRACKS, playMusicPreview, playTransportPreview, unlockAudio } from "@/lib/music";
@@ -166,6 +166,11 @@ export function Studio() {
     }
     return Math.round(sum);
   }, [project]);
+
+  const visitedPlacesCount = useMemo(
+    () => (project ? countVisitedPlaces(project.stops) : 0),
+    [project]
+  );
 
   const pinnedStopsCount = useMemo(
     () => project?.stops.filter((s) => s.name === "Pinned place").length ?? 0,
@@ -569,7 +574,7 @@ export function Studio() {
             className={stageMode === "map" ? "active" : ""}
             onClick={() => setStageMode("map")}
           >
-            🗺 2D Map Editor
+            🗺 Map Editor
           </button>
           <button
             type="button"
@@ -579,13 +584,13 @@ export function Studio() {
               setStageMode("globe");
             }}
           >
-            🌍 3D Globe Live
+            ▶ Preview
           </button>
         </div>
 
         <div className="studio-top-right">
           <span className="credits-badge">
-            {project.stops.length} stops · {totalDistanceKm.toLocaleString()} km
+            {visitedPlacesCount} {visitedPlacesCount === 1 ? "place" : "places"} · {totalDistanceKm.toLocaleString()} km
           </span>
           <button
             className={`btn ghost sm${copied ? " copied" : ""}`}
@@ -593,15 +598,6 @@ export function Studio() {
             title="Copy shareable route link"
           >
             {copied ? "✓ Copied to clipboard" : "Share"}
-          </button>
-          <button
-            className="btn ghost sm"
-            onClick={() => {
-              unlockAudio();
-              setPreview(true);
-            }}
-          >
-            ▶ Preview
           </button>
           <button
             className="btn primary sm"
@@ -1145,6 +1141,26 @@ export function Studio() {
                 </div>
               </div>
 
+              <label className="field">
+                <span className="field-label">Camera View &amp; Horizon Angle</span>
+                <select
+                  value={project.style.cameraView ?? "horizon"}
+                  onChange={(event) =>
+                    update((current) => ({
+                      ...current,
+                      style: {
+                        ...current.style,
+                        cameraView: event.target.value as Project["style"]["cameraView"],
+                      },
+                    }))
+                  }
+                >
+                  <option value="horizon">🌌 3D Tilted Horizon (Cinematic)</option>
+                  <option value="orbit">🛸 3D Orbital Banking</option>
+                  <option value="top">🌍 Classic Overhead Globe</option>
+                </select>
+              </label>
+
               <div className="color-pickers-row">
                 <label className="field">
                   <span className="field-label">Route color {limits.customColors ? "" : "· Pro"}</span>
@@ -1484,12 +1500,12 @@ export function Studio() {
                   type="button"
                   className="map-ctrl-btn text"
                   onClick={() => setStageAudio((v) => !v)}
-                  title="Toggle sound during live 3D globe preview"
+                  title="Toggle sound during preview"
                 >
                   {stageAudio ? "🔊 Sound On" : "🔇 Muted"}
                 </button>
                 <button type="button" className="map-ctrl-btn text" onClick={() => setStageMode("map")}>
-                  ✎ Back to 2D Map Editor
+                  ✎ Back to Map Editor
                 </button>
               </div>
             </div>
@@ -1504,7 +1520,7 @@ export function Studio() {
               <div>
                 <strong>{project.title}</strong>
                 <span className="modal-sub">
-                  {project.stops.length} stops · {project.style.aspect} · {project.style.resolution}p @ {project.style.fps}fps
+                  {visitedPlacesCount} {visitedPlacesCount === 1 ? "place" : "places"} · {project.style.aspect} · {project.style.resolution}p @ {project.style.fps}fps
                 </span>
               </div>
               <button

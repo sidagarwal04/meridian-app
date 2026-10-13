@@ -13,9 +13,9 @@ export function loadCountries() {
   if (!cache) {
     cache = (async () => {
       const [topo, meta] = await Promise.all([
-        fetch("/countries-50m.json")
-          .then((res) => (res.ok ? res.json() : fetch("/countries-110m.json").then((r) => r.json())))
-          .catch(() => fetch("/countries-110m.json").then((r) => r.json())) as Promise<{
+        fetch("/countries-50m.json?v=ind2")
+          .then((res) => (res.ok ? res.json() : fetch("/countries-110m.json?v=ind2").then((r) => r.json())))
+          .catch(() => fetch("/countries-110m.json?v=ind2").then((r) => r.json())) as Promise<{
           objects: { countries: unknown };
         }>,
         fetch("/country-meta.json").then((res) => res.json() as Promise<Record<string, { name: string; code: string }>>),

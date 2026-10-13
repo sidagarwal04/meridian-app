@@ -18,6 +18,16 @@ function projectFrom(title: string, seeds: Seed[], theme: Project["style"]["them
 
 export const TEMPLATES: { id: string; title: string; blurb: string; project: Project }[] = [
   {
+    id: "india-europe",
+    title: "Bengaluru to Northern Europe",
+    blurb: "Bengaluru across continents to Berlin and Denmark on a tilted 3D satellite horizon.",
+    project: projectFrom("Bengaluru to Denmark", [
+      { name: "Bengaluru", country: "India", code: "IN", lat: 12.9716, lon: 77.5946 },
+      { name: "Berlin", country: "Germany", code: "DE", lat: 52.52, lon: 13.405, transport: "plane" },
+      { name: "Denmark", country: "Denmark", code: "DK", lat: 56.2639, lon: 9.5018, transport: "plane" },
+    ], "satellite"),
+  },
+  {
     id: "europe",
     title: "Europe in ten days",
     blurb: "Lisbon to Rome, with trains between the cities in between.",

@@ -2,7 +2,7 @@
 
 import { geoGraticule, geoNaturalEarth1, geoOrthographic, geoPath, type GeoProjection } from "d3-geo";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flagEmoji, greatCircle, haversineKm } from "@/lib/geo";
+import { countVisitedPlaces, flagEmoji, greatCircle, haversineKm } from "@/lib/geo";
 import { drawShaderGlobe } from "@/lib/globeShader";
 import { drawSatelliteBiomeShading } from "@/lib/render";
 import { THEMES, transportMeta, type Leg, type Stop, type ThemeId } from "@/lib/types";
@@ -144,8 +144,30 @@ export function MapEditor({
     if (!validStops.length) {
       setZoom(1);
       setPan({ x: 0, y: 0 });
+      setGlobeCenter({ lon: 10, lat: 30 });
       return;
     }
+
+    // Compute spherical centroid of validStops for 3D Globe view
+    let sx = 0,
+      sy = 0,
+      sz = 0;
+    validStops.forEach((s) => {
+      const phi = (s.lat * Math.PI) / 180;
+      const lam = (s.lon * Math.PI) / 180;
+      sx += Math.cos(phi) * Math.cos(lam);
+      sy += Math.cos(phi) * Math.sin(lam);
+      sz += Math.sin(phi);
+    });
+    const cLon = (Math.atan2(sy, sx) * 180) / Math.PI;
+    const cLat = (Math.atan2(sz, Math.hypot(sx, sy)) * 180) / Math.PI;
+    setGlobeCenter({ lon: cLon, lat: Math.max(-72, Math.min(72, cLat)) });
+
+    let maxKm = 300;
+    validStops.forEach((s) => {
+      maxKm = Math.max(maxKm, haversineKm({ lat: cLat, lon: cLon }, s));
+    });
+
     const baseScale = Math.min(width / 5.1, height / 2.75);
     const baseProj = geoNaturalEarth1()
       .scale(baseScale)
@@ -156,7 +178,7 @@ export function MapEditor({
       .filter((p): p is [number, number] => Boolean(p && Number.isFinite(p[0]) && Number.isFinite(p[1])));
 
     if (!pts.length) {
-      setZoom(1);
+      setZoom(1.2);
       setPan({ x: 0, y: 0 });
       return;
     }
@@ -172,16 +194,19 @@ export function MapEditor({
     const spanX = Math.max(maxX - minX, 90);
     const spanY = Math.max(maxY - minY, 70);
 
-    const targetZoom = Math.max(1, Math.min(2.8, Math.min((width * 0.62) / spanX, (height * 0.58) / spanY)));
-    const rawPanX = (width / 2 - cx) * targetZoom;
-    const rawPanY = (height / 2 - cy) * targetZoom;
+    const flatZoom = Math.max(1, Math.min(2.8, Math.min((width * 0.62) / spanX, (height * 0.58) / spanY)));
+    const globeZoom =
+      maxKm > 4200 ? 0.95 : maxKm > 2200 ? 1.25 : maxKm > 1000 ? 1.65 : maxKm > 450 ? 2.1 : 2.55;
+    const targetZoom = projView === "globe" ? globeZoom : flatZoom;
+    const rawPanX = (width / 2 - cx) * flatZoom;
+    const rawPanY = (height / 2 - cy) * flatZoom;
 
     setZoom(targetZoom);
-    setPan(clampPan(rawPanX, rawPanY, targetZoom, width, height));
-  }, [validStops, clampPan]);
+    setPan(projView === "globe" ? { x: 0, y: 0 } : clampPan(rawPanX, rawPanY, flatZoom, width, height));
+  }, [validStops, clampPan, projView]);
 
   const resetWorld = useCallback(() => {
-    setZoom(1);
+    setZoom(0.95);
     setPan({ x: 0, y: 0 });
     setSelectedStopId(null);
   }, []);
@@ -220,10 +245,14 @@ export function MapEditor({
     [stops]
   );
 
-  // Strict coordinate inversion that rejects clicks outside the Natural Earth sphere oval
+  // Strict coordinate inversion that rejects clicks outside the 3D globe or 2D sphere oval
   const invertInsideSphere = useCallback((mx: number, my: number): { lat: number; lon: number } | null => {
     const projection = projectionRef.current;
     if (!projection?.invert) return null;
+    if (sphereBoundsRef.current) {
+      const { cx, cy, r } = sphereBoundsRef.current;
+      if (Math.hypot(mx - cx, my - cy) > r - 1) return null;
+    }
     const coord = projection.invert([mx, my]);
     if (!coord) return null;
     const [lon, lat] = coord;
@@ -258,81 +287,123 @@ export function MapEditor({
       ctx.fillStyle = palette.bg;
       ctx.fillRect(0, 0, width, height);
 
-      // Ambient background glow
-      const bgGlow = ctx.createRadialGradient(
-        width / 2,
-        height / 2,
-        Math.min(width, height) * 0.05,
-        width / 2,
-        height / 2,
-        Math.max(width, height) * 0.7
-      );
-      bgGlow.addColorStop(0, "rgba(56, 189, 248, 0.08)");
-      bgGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
-      ctx.fillStyle = bgGlow;
-      ctx.fillRect(0, 0, width, height);
+      // Subtle starfield in 3D space backdrop
+      if (palette.stars) {
+        let seed = 42;
+        for (let i = 0; i < 65; i++) {
+          seed = (seed * 16807) % 2147483647;
+          const sx = ((seed % 1000) / 1000) * width;
+          seed = (seed * 16807) % 2147483647;
+          const sy = ((seed % 1000) / 1000) * height;
+          ctx.beginPath();
+          ctx.arc(sx, sy, i % 5 === 0 ? 1.1 : 0.65, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(255, 255, 255, 0.26)";
+          ctx.fill();
+        }
+      }
 
-      const baseScale = Math.min(width / 5.1, height / 2.75);
       const safeZoom = Number.isFinite(zoom) ? Math.max(0.75, Math.min(6, zoom)) : 1;
-      const clampedPan = clampPan(pan.x, pan.y, safeZoom, width, height);
+      let projection: GeoProjection;
+      let shaderRendered = false;
 
-      const projection = geoNaturalEarth1()
-        .scale(baseScale * safeZoom)
-        .translate([width / 2 + clampedPan.x, height / 2 + clampedPan.y]);
+      if (projView === "globe") {
+        const minDim = Math.min(width, height);
+        const effFactor = 0.56 * (safeZoom <= 1.2 ? safeZoom : 1.2 + Math.pow(safeZoom - 1.2, 0.78) * 0.9);
+        const globeRadius = effFactor * minDim;
+        const zoomBlend = Math.max(0, Math.min(1, (effFactor - 0.52) / 0.65));
+
+        const desiredLimbPx = Math.min(height * 0.38, minDim * 0.40);
+        const sinTilt = Math.max(0.34, Math.min(0.86, 1 - desiredLimbPx / globeRadius));
+        const tiltDeg = 18 * (1 - zoomBlend) + ((Math.asin(sinTilt) * 180) / Math.PI) * zoomBlend;
+        const rollDeg = -4 * (1 - zoomBlend) + -12.5 * zoomBlend;
+
+        const rotation: [number, number, number] = [-globeCenter.lon, -globeCenter.lat + tiltDeg, rollDeg];
+        const tempProj = geoOrthographic()
+          .precision(0.3)
+          .rotate(rotation)
+          .translate([0, 0])
+          .scale(globeRadius);
+        const off = tempProj([globeCenter.lon, globeCenter.lat]) ?? [0, 0];
+        const cx = width * (0.5 + 0.02 * zoomBlend) - off[0];
+        const cy = height * (0.51 + 0.05 * zoomBlend) - off[1];
+
+        sphereBoundsRef.current = { cx, cy, r: globeRadius };
+        projection = geoOrthographic()
+          .precision(0.3)
+          .rotate(rotation)
+          .translate([cx, cy])
+          .scale(globeRadius);
+
+        shaderRendered = drawShaderGlobe(ctx, {
+          w: width,
+          h: height,
+          cx,
+          cy,
+          scale: globeRadius,
+          rotation,
+          theme,
+          projMode: "globe",
+          time: 0,
+        });
+      } else {
+        sphereBoundsRef.current = null;
+        const baseScale = Math.min(width / 5.1, height / 2.75);
+        const clampedPan = clampPan(pan.x, pan.y, safeZoom, width, height);
+        const cx = width / 2 + clampedPan.x;
+        const cy = height / 2 + clampedPan.y;
+        const scale = baseScale * safeZoom;
+
+        projection = geoNaturalEarth1()
+          .scale(scale)
+          .translate([cx, cy]);
+
+        shaderRendered = drawShaderGlobe(ctx, {
+          w: width,
+          h: height,
+          cx,
+          cy,
+          scale,
+          rotation: [0, 0, 0],
+          theme,
+          projMode: "naturalEarth1",
+          time: 0,
+        });
+      }
 
       projectionRef.current = projection;
       const path = geoPath(projection, ctx);
-
-      // Draw Ocean Sphere
-      ctx.save();
-      ctx.beginPath();
-      path({ type: "Sphere" } as never);
-      ctx.fillStyle = palette.ocean;
-      ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
-      ctx.shadowBlur = 28;
-      ctx.fill();
-      ctx.restore();
-
-      // Visited countries set
       const visitedCodes = new Set(validStops.map((s) => s.code).filter(Boolean));
       const isSatelliteLook = theme === "earth" || theme === "satellite";
 
-      // Shallow coastal shelf glow
-      if (isSatelliteLook) {
+      if (!shaderRendered) {
+        // Fallback 2D canvas fill while WebGL texture loads
         ctx.save();
         ctx.beginPath();
         path({ type: "Sphere" } as never);
-        ctx.clip();
+        ctx.fillStyle = palette.ocean;
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.beginPath();
         countries.forEach((country) => {
-          ctx.beginPath();
           path(country.feature as never);
-          ctx.strokeStyle = "rgba(56, 189, 248, 0.14)";
-          ctx.lineWidth = Math.max(3, baseScale * safeZoom * 0.025);
-          ctx.stroke();
         });
+        ctx.fillStyle = palette.land;
+        ctx.fill();
+        ctx.clip();
+        drawSatelliteBiomeShading(ctx, projection, Math.min(width, height) * safeZoom, theme);
         ctx.restore();
       }
 
-      // Landmasses base fill + satellite biome terrain shading
-      ctx.save();
-      ctx.beginPath();
-      countries.forEach((country) => {
-        path(country.feature as never);
-      });
-      ctx.fillStyle = palette.land;
-      ctx.fill();
-      ctx.clip();
-      drawSatelliteBiomeShading(ctx, projection, baseScale * safeZoom * 2.2, theme);
-      ctx.restore();
-
-      // Country borders + crisp white outlines on visited countries
+      // Country borders + crisp glowing white outlines on visited countries
       const hotCountries: CountryShape[] = [];
       countries.forEach((country) => {
         const isVisited = Boolean(country.code && visitedCodes.has(country.code));
         if (isVisited) hotCountries.push(country);
         ctx.beginPath();
         path(country.feature as never);
-        ctx.lineWidth = 0.55;
+        ctx.lineWidth = 0.6;
         ctx.strokeStyle = palette.border;
         ctx.stroke();
       });
@@ -341,10 +412,12 @@ export function MapEditor({
         ctx.save();
         ctx.beginPath();
         path(country.feature as never);
-        ctx.fillStyle = palette.landHi;
+        ctx.fillStyle = isSatelliteLook ? "rgba(125, 211, 252, 0.12)" : palette.landHi;
         ctx.fill();
-        ctx.lineWidth = 1.25;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.88)";
+        ctx.shadowColor = "rgba(255, 255, 255, 0.72)";
+        ctx.shadowBlur = 6;
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.94)";
         ctx.stroke();
         ctx.restore();
       });
@@ -352,16 +425,22 @@ export function MapEditor({
       // Graticule
       ctx.beginPath();
       path(geoGraticule()());
-      ctx.strokeStyle = palette.stars ? "rgba(255,255,255,0.08)" : "rgba(30,40,50,0.09)";
+      ctx.strokeStyle = palette.stars ? "rgba(255,255,255,0.035)" : "rgba(30,40,50,0.06)";
       ctx.lineWidth = 0.5;
       ctx.stroke();
 
-      // Sphere outer border rim
+      // Sphere outer atmospheric rim
+      ctx.save();
       ctx.beginPath();
       path({ type: "Sphere" } as never);
-      ctx.strokeStyle = palette.stars ? "rgba(148, 163, 184, 0.32)" : "rgba(71, 85, 105, 0.35)";
-      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = palette.stars ? "rgba(125, 211, 252, 0.48)" : "rgba(71, 85, 105, 0.35)";
+      ctx.lineWidth = 1.5;
+      if (palette.stars && projView === "globe") {
+        ctx.shadowColor = "rgba(56, 189, 248, 0.6)";
+        ctx.shadowBlur = 10;
+      }
       ctx.stroke();
+      ctx.restore();
 
       // Draw curved great-circle route arcs between valid stops
       if (validStops.length > 1) {
@@ -543,7 +622,7 @@ export function MapEditor({
     const observer = new ResizeObserver(paint);
     observer.observe(wrap);
     return () => observer.disconnect();
-  }, [countries, stops, validStops, legs, theme, color, zoom, pan, selectedStopId, hoveredStopId, stopImages, clampPan]);
+  }, [countries, stops, validStops, legs, theme, color, zoom, pan, projView, globeCenter, selectedStopId, hoveredStopId, stopImages, clampPan]);
 
   const selectedIndex = useMemo(
     () => (selectedStopId ? stops.findIndex((s) => s.id === selectedStopId) : -1),
@@ -556,7 +635,7 @@ export function MapEditor({
     const xy = projectionRef.current([selectedStop.lon, selectedStop.lat]);
     return xy ? { x: xy[0], y: xy[1] } : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStop, zoom, pan, countries]);
+  }, [selectedStop, zoom, pan, projView, globeCenter, countries]);
 
   const totalKm = useMemo(() => {
     let km = 0;
@@ -571,7 +650,7 @@ export function MapEditor({
     const width = wrap?.clientWidth || 640;
     const height = wrap?.clientHeight || 480;
     setZoom((prev) => {
-      const next = Math.max(0.85, Math.min(5.5, Number((prev * factor).toFixed(2))));
+      const next = Math.max(0.75, Math.min(5.5, Number((prev * factor).toFixed(2))));
       setPan((p) => clampPan(p.x, p.y, next, width, height));
       return next;
     });
@@ -597,6 +676,8 @@ export function MapEditor({
           startY: event.clientY,
           startPanX: pan.x,
           startPanY: pan.y,
+          startLon: globeCenter.lon,
+          startLat: globeCenter.lat,
           draggingStopIndex: hitStopIdx >= 0 ? hitStopIdx : null,
         };
       }}
@@ -631,7 +712,17 @@ export function MapEditor({
           return;
         }
 
-        // Otherwise pan the map smoothly
+        if (projView === "globe") {
+          const degPerPx = 0.24 / Math.max(0.7, zoom);
+          let nextLon = dragRef.current.startLon - dx * degPerPx;
+          while (nextLon > 180) nextLon -= 360;
+          while (nextLon < -180) nextLon += 360;
+          const nextLat = Math.max(-75, Math.min(75, dragRef.current.startLat + dy * degPerPx));
+          setGlobeCenter({ lon: nextLon, lat: nextLat });
+          return;
+        }
+
+        // Otherwise pan the 2D map smoothly
         const wrap = wrapRef.current;
         const width = wrap?.clientWidth || 640;
         const height = wrap?.clientHeight || 480;
@@ -699,7 +790,7 @@ export function MapEditor({
             type="button"
             className={clickMode === "add" ? "active" : ""}
             onClick={() => setClickMode("add")}
-            title="Click anywhere on the globe to drop a new stop, or drag to pan"
+            title="Click anywhere on the globe to drop a new stop, or drag to orbit"
           >
             <span>＋</span> Click to add stop
           </button>
@@ -707,13 +798,15 @@ export function MapEditor({
             type="button"
             className={clickMode === "pan" ? "active" : ""}
             onClick={() => setClickMode("pan")}
-            title="Pan and inspect pins without adding new stops on click"
+            title="Orbit/pan and inspect pins without adding new stops on click"
           >
-            <span>✋</span> Pan / Select only
+            <span>✋</span> Orbit / Select
           </button>
         </div>
         <div className="map-stats-pill">
-          <span>{stops.length} {stops.length === 1 ? "place" : "places"}</span>
+          <span>
+            {countVisitedPlaces(stops)} {countVisitedPlaces(stops) === 1 ? "place" : "places"}
+          </span>
           {totalKm > 0 ? <span>· {totalKm.toLocaleString()} km</span> : null}
           {cursorCoord ? (
             <span className="map-coord-readout">
@@ -725,6 +818,14 @@ export function MapEditor({
 
       {/* Top-Right Camera Controls */}
       <div className="map-ui-overlay map-toolbar-right">
+        <button
+          type="button"
+          className="map-ctrl-btn text"
+          onClick={() => setProjView((v) => (v === "globe" ? "flat" : "globe"))}
+          title="Switch between 3D Tilted Horizon Globe and 2D Flat Map"
+        >
+          {projView === "globe" ? "🌍 3D Horizon" : "🗺 2D Flat"}
+        </button>
         <button type="button" className="map-ctrl-btn" onClick={() => adjustZoom(1.25)} title="Zoom in">
           ＋
         </button>

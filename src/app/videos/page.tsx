@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { GlobeStage } from "@/components/GlobeStage";
 import { PageShell } from "@/components/PageShell";
-import { flagEmoji, haversineKm } from "@/lib/geo";
+import { countVisitedPlaces, flagEmoji, haversineKm } from "@/lib/geo";
 import { createAndSave, deleteProject, listProjects, saveProject } from "@/lib/storage";
 import { TEMPLATES } from "@/lib/templates";
 import { THEMES, uid, type Project } from "@/lib/types";
@@ -84,7 +84,9 @@ export default function Page() {
                 </Link>
                 <div className="video-copy">
                   <div className="card-meta-row">
-                    <span>{project.stops.length} stops</span>
+                    <span>
+                      {countVisitedPlaces(project.stops)} {countVisitedPlaces(project.stops) === 1 ? "place" : "places"}
+                    </span>
                     <span>·</span>
                     <span>{distanceOf(project).toLocaleString()} km</span>
                     <span>·</span>
