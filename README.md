@@ -1,5 +1,7 @@
 # Meridian
 
+**Live App:** [meridian.meetsid.dev](https://meridian.meetsid.dev/)
+
 Turn any journey into a cinematic 3D globe or 2D map animation ready for sharing or presenting.
 
 Plot the places you visited, pick how you traveled between each leg, attach polaroid photos, score the trip with procedural soundtracks and vehicle sound effects, and export high-definition video directly from your browser. Sign in with Google via NextAuth to sync your routes and style settings across devices (powered by Netlify Blobs + IndexedDB), while keeping personal stop photos private on your local device.
@@ -42,7 +44,7 @@ NETLIFY_AUTH_TOKEN=
 
 1. **Google OAuth (`NEXTAUTH_*` & `GOOGLE_*`)**:
    - `NEXTAUTH_SECRET` can be any long random string (e.g., `openssl rand -base64 32`).
-   - In the [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth 2.0 Client ID of type **Web application** and add `http://localhost:3456/api/auth/callback/google` (plus your production domain callback URL) to **Authorized redirect URIs**.
+   - In the [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an OAuth 2.0 Client ID of type **Web application** and add `http://localhost:3456/api/auth/callback/google` (and `https://meridian.meetsid.dev/api/auth/callback/google` for production) to **Authorized redirect URIs**.
 2. **Cross-Device Storage (`@netlify/blobs`)**:
    - **On Netlify (Production)**: Zero configuration is required. Netlify automatically provisions and injects the `meridian-projects` Netlify Blobs store context at runtime.
    - **On Localhost**: By default, if `NETLIFY_SITE_ID` and `NETLIFY_AUTH_TOKEN` are left blank, the dev server stores cloud-synced projects in a local `.data/cloud-projects.json` fallback file. If you want `localhost:3456` to sync directly with your live production Netlify Blobs store, add your Netlify **Project ID / Site ID** (`NETLIFY_SITE_ID`) and a **Personal Access Token** (`NETLIFY_AUTH_TOKEN`) to `.env.local`.

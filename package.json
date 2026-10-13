@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Turn a trip into a clear map animation for sharing or presenting.",
+  "homepage": "https://meridian.meetsid.dev/",
   "license": "MIT",
   "scripts": {
     "dev": "next dev -p 3456",
