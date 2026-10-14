@@ -7,7 +7,14 @@ import { useAuth } from "@/components/AuthProvider";
 import { GlobeStage } from "@/components/GlobeStage";
 import { PageShell } from "@/components/PageShell";
 import { countVisitedPlaces, flagEmoji, haversineKm } from "@/lib/geo";
-import { createAndSave, deleteProject, listProjects, saveProject } from "@/lib/storage";
+import {
+  createAndSave,
+  deleteProject,
+  getCachedProjectsSync,
+  listProjects,
+  saveProject,
+  subscribeProjects,
+} from "@/lib/storage";
 import { TEMPLATES } from "@/lib/templates";
 import { THEMES, uid, type Project } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
@@ -16,8 +23,22 @@ export default function Page() {
   const { ready, user } = useAuth();
   const { t } = useI18n();
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projects, setProjects] = useState<Project[]>(() => getCachedProjectsSync() ?? []);
+  const [loading, setLoading] = useState<boolean>(() => getCachedProjectsSync() === null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const cached = getCachedProjectsSync();
+    if (cached) {
+      setProjects(cached);
+      setLoading(false);
+    }
+    const unsub = subscribeProjects((next) => {
+      setProjects(next);
+      setLoading(false);
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -25,7 +46,13 @@ export default function Page() {
       router.replace("/login?next=/videos");
       return;
     }
-    listProjects().then(setProjects);
+    listProjects((updated) => {
+      setProjects(updated);
+      setLoading(false);
+    }).then((initial) => {
+      setProjects(initial);
+      setLoading(false);
+    });
   }, [ready, user, router]);
 
   const create = async () => {
@@ -120,7 +147,6 @@ export default function Page() {
                         updatedAt: Date.now(),
                       };
                       await saveProject(copy);
-                      setProjects(await listProjects());
                     }}
                   >
                     Duplicate
@@ -129,7 +155,6 @@ export default function Page() {
                     className="btn ghost sm danger-hover"
                     onClick={async () => {
                       await deleteProject(project.id);
-                      setProjects(await listProjects());
                     }}
                   >
                     Delete
@@ -137,6 +162,11 @@ export default function Page() {
                 </div>
               </article>
             ))}
+          </div>
+        ) : loading ? (
+          <div className="empty-library-card">
+            <span className="feature-icon" style={{ margin: "0 auto" }}>🧭</span>
+            <h2>Loading your expeditions…</h2>
           </div>
         ) : (
           <div className="empty-library-card">

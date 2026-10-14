@@ -120,6 +120,27 @@ export function profileFor(transport: Transport) {
 
 const pathCache = new Map<string, [number, number][]>();
 
+export function buildSyncPaths(
+  stops: LatLng[],
+  transports: Transport[],
+  allowRoads: boolean
+): { paths: [number, number][][]; hasUnresolvedRoads: boolean } {
+  let hasUnresolvedRoads = false;
+  const paths = transports.map((transport, i) => {
+    const a = stops[i];
+    const b = stops[i + 1];
+    if (!a || !b) return [] as [number, number][];
+    const profile = allowRoads ? profileFor(transport) : null;
+    if (!profile) return greatCircle(a, b);
+    const key = `${profile}:${a.lon.toFixed(4)},${a.lat.toFixed(4)};${b.lon.toFixed(4)},${b.lat.toFixed(4)}`;
+    const hit = pathCache.get(key);
+    if (hit) return hit;
+    hasUnresolvedRoads = true;
+    return greatCircle(a, b);
+  });
+  return { paths, hasUnresolvedRoads };
+}
+
 export async function buildPaths(
   stops: LatLng[],
   transports: Transport[],

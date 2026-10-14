@@ -1,11 +1,12 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { buildPaths } from "@/lib/geo";
+import { buildPaths, buildSyncPaths } from "@/lib/geo";
+import { onEarthTextureReady } from "@/lib/globeShader";
 import { createAudioSession, unlockAudio, type AudioSession } from "@/lib/music";
 import { animationDuration, buildSegs, drawFrame } from "@/lib/render";
 import { frameSize, legAllowed, presentStyle, type ExportFormat, type Project } from "@/lib/types";
-import { loadCountries, type CountryShape } from "@/lib/world";
+import { getLoadedCountriesSync, loadCountries, type CountryShape } from "@/lib/world";
 
 export type GlobeHandle = {
   play: () => void;
@@ -31,22 +32,6 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
   ref
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [countries, setCountries] = useState<CountryShape[] | null>(null);
-  const [paths, setPaths] = useState<[number, number][][]>([]);
-  const [images, setImages] = useState<Record<string, HTMLImageElement[]>>({});
-  const [pathsReady, setPathsReady] = useState(false);
-  const [imagesReady, setImagesReady] = useState(false);
-
-  const playing = useRef(false);
-  const elapsed = useRef(0);
-  const started = useRef<number | null>(null);
-  const raf = useRef(0);
-  const playId = useRef(0);
-  const onEndedRef = useRef(onEnded);
-  const onTimeRef = useRef(onTime);
-  const recording = useRef(false);
-  if (!recording.current) onEndedRef.current = onEnded;
-  onTimeRef.current = onTime;
 
   const shown = useMemo(() => {
     const style = presentStyle(project.style, pro);
@@ -60,6 +45,37 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     .map((leg) => leg.transport)
     .join(",")}`;
   const photoKey = shown.stops.map((stop) => `${stop.id}:${stop.photos.length}:${stop.photos.map((p) => p.slice(-24)).join(",")}`).join("|");
+
+  const syncPathInit = useMemo(
+    () =>
+      buildSyncPaths(
+        shown.stops,
+        shown.legs.map((leg) => leg.transport),
+        pro
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [signature, pro]
+  );
+
+  const [countries, setCountries] = useState<CountryShape[] | null>(() => getLoadedCountriesSync());
+  const [paths, setPaths] = useState<[number, number][][]>(() => syncPathInit.paths);
+  const [images, setImages] = useState<Record<string, HTMLImageElement[]>>({});
+  const [pathsReady, setPathsReady] = useState(true);
+  const [imagesReady, setImagesReady] = useState(
+    () => shown.stops.reduce((sum, s) => sum + (s.photos?.length || 0), 0) === 0
+  );
+
+  const playing = useRef(false);
+  const elapsed = useRef(0);
+  const started = useRef<number | null>(null);
+  const raf = useRef(0);
+  const playId = useRef(0);
+  const onEndedRef = useRef(onEnded);
+  const onTimeRef = useRef(onTime);
+  const recording = useRef(false);
+  if (!recording.current) onEndedRef.current = onEnded;
+  onTimeRef.current = onTime;
+
   const pixels = size ?? frameSize(shown.style, pro);
   const duration = animationDuration(shown, paths);
   const ready = pathsReady && imagesReady;
@@ -82,6 +98,7 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
   enableAudioRef.current = enableAudio;
 
   useEffect(() => {
+    if (countriesRef.current) return;
     let cancel = false;
     loadCountries().then((data) => {
       if (!cancel) {
@@ -95,8 +112,23 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
   }, []);
 
   useEffect(() => {
+    return onEarthTextureReady(() => {
+      if (!playing.current && !recording.current && countriesRef.current) {
+        const t = playModeRef.current === "freeze-end" ? Math.max(0, durationRef.current - 0.05) : elapsed.current;
+        paint(t, null);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     let cancel = false;
-    setPathsReady(false);
+    pathsRef.current = syncPathInit.paths;
+    setPaths(syncPathInit.paths);
+    setPathsReady(true);
+
+    if (!syncPathInit.hasUnresolvedRoads) return;
+
     buildPaths(
       shown.stops,
       shown.legs.map((leg) => leg.transport),
@@ -112,7 +144,7 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     };
     // signature already covers coordinates and transport
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, pro]);
+  }, [signature, pro, syncPathInit]);
 
   useEffect(() => {
     let cancel = false;

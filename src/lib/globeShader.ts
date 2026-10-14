@@ -572,6 +572,18 @@ function getOrCreateGL(): GLState | null {
 }
 
 let earthTexturePromise: Promise<void> | null = null;
+const earthTextureListeners = new Set<() => void>();
+
+export function onEarthTextureReady(cb: () => void): () => void {
+  if (sharedGL?.hasTex) {
+    cb();
+    return () => {};
+  }
+  earthTextureListeners.add(cb);
+  return () => {
+    earthTextureListeners.delete(cb);
+  };
+}
 
 export function preloadEarthTexture(): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
@@ -591,6 +603,8 @@ export function preloadEarthTexture(): Promise<void> {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         state.hasTex = true;
       }
+      earthTextureListeners.forEach((fn) => fn());
+      earthTextureListeners.clear();
       resolve();
     };
     img.onerror = () => resolve();

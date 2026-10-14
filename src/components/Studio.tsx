@@ -8,7 +8,7 @@ import { countVisitedPlaces, flagEmoji, haversineKm, nearestCity } from "@/lib/g
 import { parseGeoJson, parseGpx, parseItinerary, parseKml, placesFromGoogleUrl, simplifyTrack } from "@/lib/parse";
 import { encodeRoute } from "@/lib/share";
 import { TRACKS, playMusicPreview, playTransportPreview, unlockAudio } from "@/lib/music";
-import { getProject, saveProject } from "@/lib/storage";
+import { getCachedProjectSync, getProject, saveProject } from "@/lib/storage";
 import { TEMPLATES } from "@/lib/templates";
 import {
   EXPORT_FORMATS,
@@ -83,7 +83,10 @@ export function Studio() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { ready, user } = useAuth();
-  const [project, setProject] = useState<Project | null>(null);
+  const [project, setProject] = useState<Project | null>(() => {
+    const syncHit = getCachedProjectSync(params.id);
+    return syncHit ? sanitizeProject(syncHit) : null;
+  });
   const [tab, setTab] = useState<Tab>("route");
   const [stageMode, setStageMode] = useState<StageMode>("map");
   const [query, setQuery] = useState("");
@@ -132,13 +135,24 @@ export function Studio() {
       router.replace(`/login?next=/studio/${params.id}`);
       return;
     }
-    getProject(params.id).then((found) => {
+    let active = true;
+    getProject(params.id, (cloudUpdated) => {
+      if (!active) return;
+      setProject((prev) => {
+        if (prev && prev.updatedAt >= cloudUpdated.updatedAt) return prev;
+        return sanitizeProject(cloudUpdated);
+      });
+    }).then((found) => {
+      if (!active) return;
       if (!found) router.replace("/videos");
       else {
         setProject(sanitizeProject(found));
         booted.current = true;
       }
     });
+    return () => {
+      active = false;
+    };
   }, [ready, user, params.id, router]);
 
   useEffect(() => {

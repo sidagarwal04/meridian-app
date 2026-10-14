@@ -101,6 +101,46 @@ export function resolveNetlifyStore(): Store | null {
 
 type LocalStoreData = Record<string, Project>;
 
+const userProjectsMemCache = new Map<string, { expiresAt: number; byId: Map<string, Project> }>();
+const MEM_CACHE_TTL_MS = 60_000;
+
+function getMemCacheForEmail(email: string): Map<string, Project> | null {
+  const norm = email.trim().toLowerCase();
+  const entry = userProjectsMemCache.get(norm);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    userProjectsMemCache.delete(norm);
+    return null;
+  }
+  return entry.byId;
+}
+
+function setMemCacheForEmail(email: string, projects: Project[]): void {
+  const norm = email.trim().toLowerCase();
+  const byId = new Map<string, Project>();
+  for (const p of projects) {
+    byId.set(p.id, p);
+  }
+  userProjectsMemCache.set(norm, { expiresAt: Date.now() + MEM_CACHE_TTL_MS, byId });
+}
+
+function upsertMemCacheProject(email: string, project: Project): void {
+  const norm = email.trim().toLowerCase();
+  const entry = userProjectsMemCache.get(norm);
+  if (entry) {
+    entry.byId.set(project.id, project);
+    entry.expiresAt = Date.now() + MEM_CACHE_TTL_MS;
+  }
+}
+
+function deleteMemCacheProject(email: string, projectId: string): void {
+  const norm = email.trim().toLowerCase();
+  const entry = userProjectsMemCache.get(norm);
+  if (entry) {
+    entry.byId.delete(projectId);
+  }
+}
+
 async function readLocalStore(): Promise<LocalStoreData> {
   try {
     const raw = await fs.readFile(LOCAL_FALLBACK_FILE, "utf8");
@@ -116,6 +156,11 @@ async function writeLocalStore(data: LocalStoreData): Promise<void> {
 }
 
 export async function listCloudProjects(email: string): Promise<Project[]> {
+  const cached = getMemCacheForEmail(email);
+  if (cached) {
+    return Array.from(cached.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
   const store = resolveNetlifyStore();
   const prefix = emailPrefix(email);
 
@@ -131,30 +176,41 @@ export async function listCloudProjects(email: string): Promise<Project[]> {
           }
         })
       );
-      return items
+      const sorted = items
         .filter((item): item is Project => Boolean(item && item.id))
         .map((item) => stripProjectPhotos(item, email))
         .sort((a, b) => b.updatedAt - a.updatedAt);
+      setMemCacheForEmail(email, sorted);
+      return sorted;
     } catch {
       // Fall back to local store if Netlify Blobs is unreachable
     }
   }
 
   const all = await readLocalStore();
-  return Object.entries(all)
+  const sorted = Object.entries(all)
     .filter(([key]) => key.startsWith(prefix))
     .map(([, project]) => stripProjectPhotos(project, email))
     .sort((a, b) => b.updatedAt - a.updatedAt);
+  setMemCacheForEmail(email, sorted);
+  return sorted;
 }
 
 export async function getCloudProject(email: string, projectId: string): Promise<Project | null> {
+  const cached = getMemCacheForEmail(email);
+  if (cached && cached.has(projectId)) {
+    return cached.get(projectId) ?? null;
+  }
+
   const store = resolveNetlifyStore();
   const key = projectKey(email, projectId);
 
   if (store) {
     try {
       const found = (await store.get(key, { type: "json" })) as Project | null;
-      return found ? stripProjectPhotos(found, email) : null;
+      const sanitized = found ? stripProjectPhotos(found, email) : null;
+      if (sanitized) upsertMemCacheProject(email, sanitized);
+      return sanitized;
     } catch {
       // Fall back to local store
     }
@@ -162,11 +218,14 @@ export async function getCloudProject(email: string, projectId: string): Promise
 
   const all = await readLocalStore();
   const found = all[key];
-  return found ? stripProjectPhotos(found, email) : null;
+  const sanitized = found ? stripProjectPhotos(found, email) : null;
+  if (sanitized) upsertMemCacheProject(email, sanitized);
+  return sanitized;
 }
 
 export async function saveCloudProject(email: string, project: Project): Promise<Project> {
   const sanitized = stripProjectPhotos(project, email);
+  upsertMemCacheProject(email, sanitized);
   const store = resolveNetlifyStore();
   const key = projectKey(email, sanitized.id);
 
@@ -192,6 +251,7 @@ export async function saveCloudProject(email: string, project: Project): Promise
 }
 
 export async function deleteCloudProject(email: string, projectId: string): Promise<void> {
+  deleteMemCacheProject(email, projectId);
   const store = resolveNetlifyStore();
   const key = projectKey(email, projectId);
 

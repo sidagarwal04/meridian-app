@@ -8,9 +8,17 @@ export type CountryShape = {
 };
 
 let cache: Promise<CountryShape[]> | null = null;
+let resolvedCountries: CountryShape[] | null = null;
+
+export function getLoadedCountriesSync(): CountryShape[] | null {
+  return resolvedCountries;
+}
 
 export function loadCountries() {
+  if (resolvedCountries) return Promise.resolve(resolvedCountries);
   if (!cache) {
+    // Warm WebGL Earth texture in parallel without blocking country geometry resolution
+    void preloadEarthTexture();
     cache = (async () => {
       const [topo, meta] = await Promise.all([
         fetch("/countries-50m.json?v=ind2")
@@ -19,13 +27,12 @@ export function loadCountries() {
           objects: { countries: unknown };
         }>,
         fetch("/country-meta.json").then((res) => res.json() as Promise<Record<string, { name: string; code: string }>>),
-        preloadEarthTexture(),
       ]);
       const { feature } = await import("topojson-client");
       const collection = feature(topo as never, topo.objects.countries as never) as unknown as {
         features: { id?: string | number; properties?: { name?: string } }[];
       };
-      return collection.features.map((item) => {
+      const list = collection.features.map((item) => {
         const id = String(Number(item.id));
         const info = meta[id];
         const propName = item.properties?.name ?? "";
@@ -37,6 +44,8 @@ export function loadCountries() {
           feature: item,
         };
       });
+      resolvedCountries = list;
+      return list;
     })();
   }
   return cache;

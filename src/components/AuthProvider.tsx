@@ -2,8 +2,9 @@
 
 import { createContext, useContext, useEffect, useMemo } from "react";
 import { signOut as googleSignOut, useSession } from "next-auth/react";
-import { accountFor, clearSession, defaultAccount, persistSession } from "@/lib/storage";
+import { accountFor, clearSession, defaultAccount, persistSession, preloadProjects } from "@/lib/storage";
 import type { User } from "@/lib/types";
+import { loadCountries } from "@/lib/world";
 
 type AuthValue = {
   ready: boolean;
@@ -37,6 +38,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user) return;
     persistSession(user, accountFor(user.email) ?? defaultAccount());
+    preloadProjects();
+    void loadCountries();
   }, [user]);
 
   const value: AuthValue = {
