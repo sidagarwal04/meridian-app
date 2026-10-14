@@ -4,7 +4,7 @@ import { geoGraticule, geoNaturalEarth1, geoOrthographic, geoPath, type GeoProje
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { countVisitedPlaces, flagEmoji, greatCircle, haversineKm } from "@/lib/geo";
 import { drawShaderGlobe } from "@/lib/globeShader";
-import { drawSatelliteBiomeShading } from "@/lib/render";
+import { drawSatelliteBiomeShading, drawTransportVehicle } from "@/lib/render";
 import { THEMES, transportMeta, type Leg, type Stop, type ThemeId } from "@/lib/types";
 import { loadCountries, type CountryShape } from "@/lib/world";
 
@@ -479,8 +479,9 @@ export function MapEditor({
           ctx.stroke();
           ctx.restore();
 
-          // Midpoint transport icon badge
-          const mid = arcCoords[Math.floor(arcCoords.length / 2)];
+          // Midpoint directional 3D transport vehicle along the arc (without circle badge)
+          const midIdx = Math.floor(arcCoords.length / 2);
+          const mid = arcCoords[midIdx];
           const midXY = mid ? projection(mid) : null;
           const distPx = (() => {
             const pA = projection([a.lon, a.lat]);
@@ -488,21 +489,16 @@ export function MapEditor({
             return pA && pB ? Math.hypot(pA[0] - pB[0], pA[1] - pB[1]) : 0;
           })();
           if (midXY && distPx > 68) {
-            const meta = transportMeta(legs[i]?.transport ?? "plane");
+            const transport = legs[i]?.transport ?? "plane";
+            const meta = transportMeta(transport);
             if (meta.kind !== "draw") {
-              ctx.save();
-              ctx.beginPath();
-              ctx.arc(midXY[0], midXY[1], 10, 0, Math.PI * 2);
-              ctx.fillStyle = "rgba(15, 23, 42, 0.86)";
-              ctx.fill();
-              ctx.lineWidth = 1;
-              ctx.strokeStyle = "rgba(255,255,255,0.28)";
-              ctx.stroke();
-              ctx.font = "11px sans-serif";
-              ctx.textAlign = "center";
-              ctx.textBaseline = "middle";
-              ctx.fillText(meta.icon, midXY[0], midXY[1] + 0.5);
-              ctx.restore();
+              const p1 = projection(arcCoords[Math.max(0, midIdx - 2)]) ?? midXY;
+              const p2 = projection(arcCoords[Math.min(arcCoords.length - 1, midIdx + 2)]) ?? midXY;
+              const midAngle =
+                Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > 0.5
+                  ? Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) + Math.PI / 2
+                  : 0;
+              drawTransportVehicle(ctx, transport, midXY[0], midXY[1], midAngle, 13.5, color || palette.line, 0);
             }
           }
         }

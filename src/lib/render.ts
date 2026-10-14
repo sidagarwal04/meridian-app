@@ -446,6 +446,94 @@ export function drawSatelliteBiomeShading(
   ctx.restore();
 }
 
+export function drawTransportVehicle(
+  ctx: CanvasRenderingContext2D,
+  transport: Transport,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string,
+  time = 0
+) {
+  switch (transport) {
+    case "plane":
+      draw3DAirplane(ctx, x, y, bearingRad, size, accentColor);
+      break;
+    case "helicopter":
+      draw3DHelicopter(ctx, x, y, bearingRad, size, accentColor, time);
+      break;
+    case "train":
+      draw3DTrain(ctx, x, y, bearingRad, size, accentColor);
+      break;
+    case "car":
+      draw3DCar(ctx, x, y, bearingRad, size, accentColor);
+      break;
+    case "bus":
+      draw3DBus(ctx, x, y, bearingRad, size, accentColor);
+      break;
+    case "camper":
+      draw3DCamper(ctx, x, y, bearingRad, size, accentColor);
+      break;
+    case "motorcycle":
+      draw3DMotorcycle(ctx, x, y, bearingRad, size, accentColor);
+      break;
+    case "tuktuk":
+      draw3DTuktuk(ctx, x, y, bearingRad, size, accentColor);
+      break;
+    case "bike":
+      draw3DBike(ctx, x, y, bearingRad, size, accentColor, time);
+      break;
+    case "walk":
+      draw3DWalker(ctx, x, y, bearingRad, size, accentColor, time);
+      break;
+    case "boat":
+      draw3DBoat(ctx, x, y, bearingRad, size, accentColor);
+      break;
+    case "dot":
+      drawDirectionalDotHead(ctx, x, y, bearingRad, size, accentColor);
+      break;
+    default:
+      break;
+  }
+}
+
+function drawWakeTrail(
+  ctx: CanvasRenderingContext2D,
+  startY: number,
+  endY: number,
+  width: number,
+  accentColor: string
+) {
+  const trailGrad = ctx.createLinearGradient(0, startY, 0, endY);
+  trailGrad.addColorStop(0, accentColor);
+  trailGrad.addColorStop(1, "rgba(56, 189, 248, 0)");
+  ctx.strokeStyle = trailGrad;
+  ctx.lineWidth = Math.max(1.8, width);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(0, startY);
+  ctx.lineTo(0, endY);
+  ctx.stroke();
+}
+
+function drawHeadlightBeams(ctx: CanvasRenderingContext2D, xOffset: number, frontY: number, length: number, width: number) {
+  const sides = xOffset === 0 ? [0] : [-xOffset, xOffset];
+  for (const sx of sides) {
+    const grad = ctx.createLinearGradient(sx, frontY, sx, frontY - length);
+    grad.addColorStop(0, "rgba(254, 249, 195, 0.85)");
+    grad.addColorStop(1, "rgba(254, 249, 195, 0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(sx - width * 0.35, frontY);
+    ctx.lineTo(sx - width * 1.15, frontY - length);
+    ctx.lineTo(sx + width * 1.15, frontY - length);
+    ctx.lineTo(sx + width * 0.35, frontY);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
 function draw3DAirplane(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -469,16 +557,7 @@ function draw3DAirplane(
   ctx.restore();
 
   // Subtle blue contrail / thruster glow behind tail
-  const trailGrad = ctx.createLinearGradient(0, size * 0.35, 0, size * 1.45);
-  trailGrad.addColorStop(0, accentColor);
-  trailGrad.addColorStop(1, "rgba(56, 189, 248, 0)");
-  ctx.strokeStyle = trailGrad;
-  ctx.lineWidth = Math.max(2, size * 0.12);
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(0, size * 0.42);
-  ctx.lineTo(0, size * 1.25);
-  ctx.stroke();
+  drawWakeTrail(ctx, size * 0.42, size * 1.35, size * 0.12, accentColor);
 
   // Main 3D White Commercial Jet Wing & Tail Body
   drawJetSilhouette(ctx, size);
@@ -555,6 +634,1033 @@ function drawJetSilhouette(ctx: CanvasRenderingContext2D, s: number) {
   ctx.lineTo(-s * 0.12, -s * 0.28);
   ctx.quadraticCurveTo(-s * 0.12, -s * 0.72, 0, -s * 0.9);
   ctx.closePath();
+}
+
+function drawHelicopterBodyPath(ctx: CanvasRenderingContext2D, s: number) {
+  ctx.beginPath();
+  // Nose tip (-Y)
+  ctx.moveTo(0, -s * 0.78);
+  // Right teardrop cabin
+  ctx.bezierCurveTo(s * 0.34, -s * 0.74, s * 0.36, -s * 0.1, s * 0.1, s * 0.22);
+  // Right tail boom
+  ctx.lineTo(s * 0.05, s * 0.68);
+  // Right horizontal stabilizer
+  ctx.lineTo(s * 0.28, s * 0.72);
+  ctx.lineTo(s * 0.28, s * 0.8);
+  ctx.lineTo(s * 0.04, s * 0.78);
+  // Tail tip
+  ctx.lineTo(0, s * 0.92);
+  // Left horizontal stabilizer
+  ctx.lineTo(-s * 0.04, s * 0.78);
+  ctx.lineTo(-s * 0.28, s * 0.8);
+  ctx.lineTo(-s * 0.28, s * 0.72);
+  ctx.lineTo(-s * 0.05, s * 0.68);
+  // Left cabin
+  ctx.lineTo(-s * 0.1, s * 0.22);
+  ctx.bezierCurveTo(-s * 0.36, -s * 0.1, -s * 0.34, -s * 0.74, 0, -s * 0.78);
+  ctx.closePath();
+}
+
+function draw3DHelicopter(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string,
+  time: number
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  // Drop shadow beneath helicopter
+  ctx.save();
+  ctx.translate(size * 0.14, size * 0.22);
+  drawHelicopterBodyPath(ctx, size * 0.95);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.46)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = size * 0.32;
+  ctx.fill();
+  ctx.restore();
+
+  // Slipstream trail
+  drawWakeTrail(ctx, size * 0.45, size * 1.28, size * 0.11, accentColor);
+
+  // Landing skids & cross-struts
+  ctx.strokeStyle = "#334155";
+  ctx.lineWidth = Math.max(1.2, size * 0.055);
+  ctx.lineCap = "round";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * size * 0.34, -size * 0.52);
+    ctx.lineTo(side * size * 0.34, size * 0.12);
+    ctx.stroke();
+    // Struts
+    ctx.beginPath();
+    ctx.moveTo(side * size * 0.18, -size * 0.36);
+    ctx.lineTo(side * size * 0.34, -size * 0.36);
+    ctx.moveTo(side * size * 0.18, -size * 0.04);
+    ctx.lineTo(side * size * 0.34, -size * 0.04);
+    ctx.stroke();
+  }
+
+  // Main fuselage & tail boom
+  drawHelicopterBodyPath(ctx, size);
+  const bodyGrad = ctx.createLinearGradient(-size * 0.34, 0, size * 0.34, 0);
+  bodyGrad.addColorStop(0, "#dbeafe");
+  bodyGrad.addColorStop(0.45, "#ffffff");
+  bodyGrad.addColorStop(1, "#cbd5e1");
+  ctx.fillStyle = bodyGrad;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.52)";
+  ctx.shadowBlur = size * 0.22;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.65)";
+  ctx.lineWidth = Math.max(0.8, size * 0.03);
+  ctx.stroke();
+
+  // Accent stripe along fuselage
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.36);
+  ctx.lineTo(size * 0.08, size * 0.15);
+  ctx.lineTo(0, size * 0.66);
+  ctx.lineTo(-size * 0.08, size * 0.15);
+  ctx.closePath();
+  ctx.fillStyle = accentColor;
+  ctx.fill();
+
+  // Bubble front cockpit canopy windshield (-Y)
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.73);
+  ctx.bezierCurveTo(size * 0.24, -size * 0.7, size * 0.25, -size * 0.34, 0, -size * 0.3);
+  ctx.bezierCurveTo(-size * 0.25, -size * 0.34, -size * 0.24, -size * 0.7, 0, -size * 0.73);
+  ctx.closePath();
+  ctx.fillStyle = "#0f172a";
+  ctx.fill();
+
+  // Spinning main rotor disc & 4 blades centered over cabin
+  const rotorY = -size * 0.16;
+  const rotorR = size * 0.88;
+  ctx.save();
+  ctx.translate(0, rotorY);
+
+  // Subtle motion-blur rotor sweep circle
+  ctx.beginPath();
+  ctx.arc(0, 0, rotorR, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(226, 232, 240, 0.26)";
+  ctx.lineWidth = Math.max(1.2, size * 0.045);
+  ctx.stroke();
+
+  const spin = time * 16 + 0.4;
+  ctx.rotate(spin);
+  for (let i = 0; i < 4; i++) {
+    ctx.rotate(Math.PI / 2);
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.03, 0);
+    ctx.lineTo(-size * 0.045, -rotorR);
+    ctx.lineTo(size * 0.045, -rotorR);
+    ctx.lineTo(size * 0.03, 0);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(248, 250, 252, 0.86)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(15, 23, 42, 0.45)";
+    ctx.lineWidth = Math.max(0.6, size * 0.02);
+    ctx.stroke();
+  }
+
+  // Central rotor mast hub
+  ctx.beginPath();
+  ctx.arc(0, 0, size * 0.09, 0, Math.PI * 2);
+  ctx.fillStyle = "#1e293b";
+  ctx.fill();
+  ctx.strokeStyle = "#f8fafc";
+  ctx.lineWidth = Math.max(0.9, size * 0.03);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function drawBulletTrainPath(ctx: CanvasRenderingContext2D, s: number) {
+  const w = s * 0.24;
+  ctx.beginPath();
+  // Aerodynamic bullet nose (-Y)
+  ctx.moveTo(0, -s * 0.96);
+  ctx.bezierCurveTo(w * 0.95, -s * 0.82, w, -s * 0.42, w, -s * 0.15);
+  ctx.lineTo(w, s * 0.72);
+  ctx.quadraticCurveTo(w, s * 0.9, 0, s * 0.94);
+  ctx.quadraticCurveTo(-w, s * 0.9, -w, s * 0.72);
+  ctx.lineTo(-w, -s * 0.15);
+  ctx.bezierCurveTo(-w, -s * 0.42, -w * 0.95, -s * 0.82, 0, -s * 0.96);
+  ctx.closePath();
+}
+
+function draw3DTrain(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  // Drop shadow
+  ctx.save();
+  ctx.translate(size * 0.11, size * 0.16);
+  drawBulletTrainPath(ctx, size * 0.98);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = size * 0.28;
+  ctx.fill();
+  ctx.restore();
+
+  // High-speed rail slipstream behind rear
+  drawWakeTrail(ctx, size * 0.65, size * 1.4, size * 0.14, accentColor);
+  drawHeadlightBeams(ctx, size * 0.08, -size * 0.86, size * 0.38, size * 0.05);
+
+  // Main bullet train body
+  drawBulletTrainPath(ctx, size);
+  const bodyGrad = ctx.createLinearGradient(-size * 0.25, 0, size * 0.25, 0);
+  bodyGrad.addColorStop(0, "#dbeafe");
+  bodyGrad.addColorStop(0.45, "#ffffff");
+  bodyGrad.addColorStop(1, "#cbd5e1");
+  ctx.fillStyle = bodyGrad;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
+  ctx.shadowBlur = size * 0.22;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = Math.max(0.8, size * 0.032);
+  ctx.strokeStyle = "rgba(100, 116, 139, 0.6)";
+  ctx.stroke();
+
+  // Accent livery stripes along left and right sides converging toward nose
+  ctx.strokeStyle = accentColor;
+  ctx.lineWidth = Math.max(1.5, size * 0.06);
+  ctx.lineCap = "round";
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * size * 0.05, -size * 0.84);
+    ctx.quadraticCurveTo(side * size * 0.18, -size * 0.52, side * size * 0.18, -size * 0.2);
+    ctx.lineTo(side * size * 0.18, size * 0.78);
+    ctx.stroke();
+  }
+
+  // Wrap-around dark driver cockpit canopy (-Y)
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.14, -size * 0.52);
+  ctx.quadraticCurveTo(0, -size * 0.68, size * 0.14, -size * 0.52);
+  ctx.lineTo(size * 0.16, -size * 0.36);
+  ctx.quadraticCurveTo(0, -size * 0.45, -size * 0.16, -size * 0.36);
+  ctx.closePath();
+  ctx.fillStyle = "#0f172a";
+  ctx.fill();
+
+  // Roof car articulation seam & pantograph detail
+  ctx.strokeStyle = "rgba(71, 85, 105, 0.65)";
+  ctx.lineWidth = Math.max(0.9, size * 0.032);
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.21, size * 0.18);
+  ctx.lineTo(size * 0.21, size * 0.18);
+  ctx.stroke();
+
+  // Central roof spine highlight
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.65)";
+  ctx.lineWidth = Math.max(1, size * 0.035);
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.28);
+  ctx.lineTo(0, size * 0.74);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawCarBodyPath(ctx: CanvasRenderingContext2D, s: number) {
+  const w = s * 0.34;
+  ctx.beginPath();
+  // Front nose / bumper (-Y)
+  ctx.moveTo(-w * 0.65, -s * 0.74);
+  ctx.quadraticCurveTo(0, -s * 0.82, w * 0.65, -s * 0.74);
+  // Right front fender
+  ctx.quadraticCurveTo(w, -s * 0.68, w, -s * 0.42);
+  // Right side with mirror bump
+  ctx.lineTo(w, -s * 0.22);
+  ctx.lineTo(w * 1.24, -s * 0.16);
+  ctx.lineTo(w * 1.24, -s * 0.08);
+  ctx.lineTo(w, -s * 0.1);
+  // Right rear flank
+  ctx.lineTo(w, s * 0.52);
+  ctx.quadraticCurveTo(w, s * 0.74, w * 0.68, s * 0.76);
+  // Rear bumper (+Y)
+  ctx.quadraticCurveTo(0, s * 0.8, -w * 0.68, s * 0.76);
+  ctx.quadraticCurveTo(-w, s * 0.74, -w, s * 0.52);
+  // Left side with mirror bump
+  ctx.lineTo(-w, -s * 0.1);
+  ctx.lineTo(-w * 1.24, -s * 0.08);
+  ctx.lineTo(-w * 1.24, -s * 0.16);
+  ctx.lineTo(-w, -s * 0.22);
+  ctx.lineTo(-w, -s * 0.42);
+  ctx.quadraticCurveTo(-w, -s * 0.68, -w * 0.65, -s * 0.74);
+  ctx.closePath();
+}
+
+function draw3DCar(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  // Drop shadow
+  ctx.save();
+  ctx.translate(size * 0.1, size * 0.15);
+  drawCarBodyPath(ctx, size * 0.98);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = size * 0.26;
+  ctx.fill();
+  ctx.restore();
+
+  // Wake & headlight cones
+  drawWakeTrail(ctx, size * 0.55, size * 1.22, size * 0.12, accentColor);
+  drawHeadlightBeams(ctx, size * 0.2, -size * 0.74, size * 0.36, size * 0.06);
+
+  // 4 Tires
+  ctx.fillStyle = "#0f172a";
+  const wheelW = size * 0.09;
+  const wheelH = size * 0.22;
+  for (const sx of [-1, 1]) {
+    for (const wy of [-size * 0.42, size * 0.38]) {
+      roundRect(
+        ctx,
+        sx > 0 ? size * 0.29 : -size * 0.29 - wheelW,
+        wy - wheelH / 2,
+        wheelW,
+        wheelH,
+        wheelW * 0.4
+      );
+      ctx.fill();
+    }
+  }
+
+  // Sculpted car body
+  drawCarBodyPath(ctx, size);
+  const bodyGrad = ctx.createLinearGradient(-size * 0.34, 0, size * 0.34, 0);
+  bodyGrad.addColorStop(0, "#dbeafe");
+  bodyGrad.addColorStop(0.46, "#ffffff");
+  bodyGrad.addColorStop(1, "#cbd5e1");
+  ctx.fillStyle = bodyGrad;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.52)";
+  ctx.shadowBlur = size * 0.2;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(100, 116, 139, 0.55)";
+  ctx.lineWidth = Math.max(0.8, size * 0.03);
+  ctx.stroke();
+
+  // Hood & rear deck accent stripe
+  ctx.fillStyle = accentColor;
+  roundRect(ctx, -size * 0.1, -size * 0.72, size * 0.2, size * 1.42, size * 0.06);
+  ctx.fill();
+
+  // Front windshield (-Y)
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.25, -size * 0.32);
+  ctx.quadraticCurveTo(0, -size * 0.38, size * 0.25, -size * 0.32);
+  ctx.lineTo(size * 0.22, -size * 0.1);
+  ctx.lineTo(-size * 0.22, -size * 0.1);
+  ctx.closePath();
+  ctx.fillStyle = "#0f172a";
+  ctx.fill();
+
+  // Cabin roof panel
+  roundRect(ctx, -size * 0.22, -size * 0.1, size * 0.44, size * 0.38, size * 0.06);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fill();
+
+  // Rear window (+Y)
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.21, size * 0.28);
+  ctx.lineTo(size * 0.21, size * 0.28);
+  ctx.lineTo(size * 0.24, size * 0.46);
+  ctx.quadraticCurveTo(0, size * 0.5, -size * 0.24, size * 0.46);
+  ctx.closePath();
+  ctx.fillStyle = "#0f172a";
+  ctx.fill();
+
+  // Red taillights (+Y)
+  ctx.fillStyle = "#ef4444";
+  roundRect(ctx, -size * 0.28, size * 0.69, size * 0.14, size * 0.06, size * 0.02);
+  ctx.fill();
+  roundRect(ctx, size * 0.14, size * 0.69, size * 0.14, size * 0.06, size * 0.02);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function draw3DBus(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  const w = size * 0.64;
+  const h = size * 1.66;
+  const r = size * 0.14;
+
+  // Drop shadow
+  ctx.save();
+  ctx.translate(size * 0.11, size * 0.16);
+  roundRect(ctx, -w / 2, -h / 2, w, h, r);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = size * 0.28;
+  ctx.fill();
+  ctx.restore();
+
+  drawWakeTrail(ctx, size * 0.62, size * 1.32, size * 0.14, accentColor);
+  drawHeadlightBeams(ctx, size * 0.21, -h / 2, size * 0.36, size * 0.065);
+
+  // Protruding coach front wing mirrors
+  ctx.strokeStyle = "#1e293b";
+  ctx.lineWidth = Math.max(1.3, size * 0.055);
+  ctx.lineCap = "round";
+  for (const sx of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(sx * (w / 2), -h / 2 + size * 0.12);
+    ctx.lineTo(sx * (w / 2 + size * 0.11), -h / 2 + size * 0.04);
+    ctx.stroke();
+  }
+
+  // Main coach body
+  roundRect(ctx, -w / 2, -h / 2, w, h, r);
+  const bodyGrad = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+  bodyGrad.addColorStop(0, "#dbeafe");
+  bodyGrad.addColorStop(0.48, "#ffffff");
+  bodyGrad.addColorStop(1, "#cbd5e1");
+  ctx.fillStyle = bodyGrad;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
+  ctx.shadowBlur = size * 0.22;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "rgba(100, 116, 139, 0.6)";
+  ctx.lineWidth = Math.max(0.8, size * 0.032);
+  ctx.stroke();
+
+  // Accent livery stripes along coach flanks
+  ctx.fillStyle = accentColor;
+  roundRect(ctx, -w / 2 + size * 0.035, -h / 2 + size * 0.22, size * 0.06, h - size * 0.34, size * 0.03);
+  ctx.fill();
+  roundRect(ctx, w / 2 - size * 0.095, -h / 2 + size * 0.22, size * 0.06, h - size * 0.34, size * 0.03);
+  ctx.fill();
+
+  // Wide panoramic front windshield (-Y)
+  ctx.beginPath();
+  ctx.moveTo(-w * 0.42, -h / 2 + size * 0.07);
+  ctx.quadraticCurveTo(0, -h / 2 + size * 0.02, w * 0.42, -h / 2 + size * 0.07);
+  ctx.lineTo(w * 0.4, -h / 2 + size * 0.26);
+  ctx.lineTo(-w * 0.4, -h / 2 + size * 0.26);
+  ctx.closePath();
+  ctx.fillStyle = "#0f172a";
+  ctx.fill();
+
+  // Roof AC / skylight units
+  ctx.fillStyle = "#e2e8f0";
+  ctx.strokeStyle = "#94a3b8";
+  ctx.lineWidth = Math.max(0.7, size * 0.025);
+  for (const ry of [-size * 0.22, size * 0.24]) {
+    roundRect(ctx, -size * 0.14, ry - size * 0.14, size * 0.28, size * 0.28, size * 0.05);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Rear taillights
+  ctx.fillStyle = "#ef4444";
+  roundRect(ctx, -w * 0.38, h / 2 - size * 0.06, size * 0.13, size * 0.045, size * 0.02);
+  ctx.fill();
+  roundRect(ctx, w * 0.38 - size * 0.13, h / 2 - size * 0.06, size * 0.13, size * 0.045, size * 0.02);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function draw3DCamper(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  const w = size * 0.68;
+  const h = size * 1.54;
+  const r = size * 0.2;
+
+  // Drop shadow
+  ctx.save();
+  ctx.translate(size * 0.11, size * 0.16);
+  roundRect(ctx, -w / 2, -h / 2, w, h, r);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = size * 0.26;
+  ctx.fill();
+  ctx.restore();
+
+  drawWakeTrail(ctx, size * 0.56, size * 1.25, size * 0.13, accentColor);
+  drawHeadlightBeams(ctx, size * 0.2, -h / 2, size * 0.34, size * 0.06);
+
+  // Rear mounted spare tire (+Y)
+  roundRect(ctx, -size * 0.14, h / 2 - size * 0.03, size * 0.28, size * 0.11, size * 0.04);
+  ctx.fillStyle = "#0f172a";
+  ctx.fill();
+
+  // Base two-tone camper body (accent color lower/front hood)
+  roundRect(ctx, -w / 2, -h / 2, w, h, r);
+  ctx.fillStyle = accentColor;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.52)";
+  ctx.shadowBlur = size * 0.2;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(1, size * 0.038);
+  ctx.stroke();
+
+  // Split panoramic front windshield (-Y)
+  ctx.fillStyle = "#0f172a";
+  ctx.beginPath();
+  ctx.moveTo(-w * 0.39, -h / 2 + size * 0.12);
+  ctx.quadraticCurveTo(0, -h / 2 + size * 0.05, w * 0.39, -h / 2 + size * 0.12);
+  ctx.lineTo(w * 0.36, -h / 2 + size * 0.31);
+  ctx.lineTo(-w * 0.36, -h / 2 + size * 0.31);
+  ctx.closePath();
+  ctx.fill();
+
+  // Elevated white pop-top camper roof
+  roundRect(ctx, -w * 0.4, -h / 2 + size * 0.34, w * 0.8, h - size * 0.44, size * 0.12);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fill();
+
+  // Dark solar panel & roof rack bars on pop-top
+  roundRect(ctx, -size * 0.16, -size * 0.14, size * 0.32, size * 0.36, size * 0.04);
+  ctx.fillStyle = "#1e293b";
+  ctx.fill();
+  ctx.strokeStyle = "#94a3b8";
+  ctx.lineWidth = Math.max(0.8, size * 0.028);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function draw3DMotorcycle(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  // Drop shadow
+  ctx.save();
+  ctx.translate(size * 0.1, size * 0.14);
+  roundRect(ctx, -size * 0.2, -size * 0.82, size * 0.4, size * 1.62, size * 0.18);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = size * 0.25;
+  ctx.fill();
+  ctx.restore();
+
+  drawWakeTrail(ctx, size * 0.55, size * 1.25, size * 0.1, accentColor);
+  drawHeadlightBeams(ctx, 0, -size * 0.82, size * 0.38, size * 0.065);
+
+  // Front & rear tires
+  ctx.fillStyle = "#0f172a";
+  roundRect(ctx, -size * 0.08, -size * 0.86, size * 0.16, size * 0.38, size * 0.07);
+  ctx.fill();
+  roundRect(ctx, -size * 0.095, size * 0.44, size * 0.19, size * 0.4, size * 0.08);
+  ctx.fill();
+
+  // Swept handlebars
+  ctx.strokeStyle = "#e2e8f0";
+  ctx.lineWidth = Math.max(1.5, size * 0.065);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.42, -size * 0.32);
+  ctx.quadraticCurveTo(0, -size * 0.46, size * 0.42, -size * 0.32);
+  ctx.stroke();
+
+  // Sculpted motorcycle fairing & fuel tank
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.62);
+  ctx.bezierCurveTo(size * 0.24, -size * 0.52, size * 0.24, -size * 0.05, size * 0.15, size * 0.52);
+  ctx.quadraticCurveTo(0, size * 0.64, -size * 0.15, size * 0.52);
+  ctx.bezierCurveTo(-size * 0.24, -size * 0.05, -size * 0.24, -size * 0.52, 0, -size * 0.62);
+  ctx.closePath();
+  ctx.fillStyle = accentColor;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+  ctx.shadowBlur = size * 0.18;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(1, size * 0.036);
+  ctx.stroke();
+
+  // Rider shoulders & arms reaching to bars
+  ctx.strokeStyle = "#1e293b";
+  ctx.lineWidth = Math.max(1.8, size * 0.085);
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.34, -size * 0.32);
+  ctx.quadraticCurveTo(-size * 0.26, size * 0.08, 0, size * 0.12);
+  ctx.quadraticCurveTo(size * 0.26, size * 0.08, size * 0.34, -size * 0.32);
+  ctx.stroke();
+
+  // Rider helmet with dark front visor (-Y)
+  ctx.beginPath();
+  ctx.arc(0, -size * 0.02, size * 0.19, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.strokeStyle = "#0f172a";
+  ctx.lineWidth = Math.max(0.9, size * 0.035);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(0, -size * 0.04, size * 0.15, Math.PI * 1.12, Math.PI * 1.88);
+  ctx.strokeStyle = "#0f172a";
+  ctx.lineWidth = Math.max(1.5, size * 0.06);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function draw3DTuktuk(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  // Drop shadow
+  ctx.save();
+  ctx.translate(size * 0.1, size * 0.15);
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.8);
+  ctx.lineTo(size * 0.38, -size * 0.18);
+  ctx.lineTo(size * 0.38, size * 0.72);
+  ctx.lineTo(-size * 0.38, size * 0.72);
+  ctx.lineTo(-size * 0.38, -size * 0.18);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.46)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = size * 0.25;
+  ctx.fill();
+  ctx.restore();
+
+  drawWakeTrail(ctx, size * 0.56, size * 1.2, size * 0.11, accentColor);
+  drawHeadlightBeams(ctx, 0, -size * 0.82, size * 0.34, size * 0.06);
+
+  // Single front wheel & mudguard (-Y) + 2 rear wheels (+Y)
+  ctx.fillStyle = "#0f172a";
+  roundRect(ctx, -size * 0.08, -size * 0.86, size * 0.16, size * 0.28, size * 0.07);
+  ctx.fill();
+  for (const sx of [-1, 1]) {
+    roundRect(
+      ctx,
+      sx > 0 ? size * 0.32 : -size * 0.32 - size * 0.09,
+      size * 0.28,
+      size * 0.09,
+      size * 0.26,
+      size * 0.04
+    );
+    ctx.fill();
+  }
+
+  // Handlebars
+  ctx.strokeStyle = "#cbd5e1";
+  ctx.lineWidth = Math.max(1.3, size * 0.05);
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.32, -size * 0.38);
+  ctx.lineTo(size * 0.32, -size * 0.38);
+  ctx.stroke();
+
+  // Tapered front cowl (-Y)
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.74);
+  ctx.quadraticCurveTo(size * 0.26, -size * 0.58, size * 0.32, -size * 0.16);
+  ctx.lineTo(-size * 0.32, -size * 0.16);
+  ctx.quadraticCurveTo(-size * 0.26, -size * 0.58, 0, -size * 0.74);
+  ctx.closePath();
+  ctx.fillStyle = accentColor;
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(0.9, size * 0.032);
+  ctx.stroke();
+
+  // Curved front windshield
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.25, -size * 0.34);
+  ctx.quadraticCurveTo(0, -size * 0.44, size * 0.25, -size * 0.34);
+  ctx.strokeStyle = "#0f172a";
+  ctx.lineWidth = Math.max(1.8, size * 0.065);
+  ctx.stroke();
+
+  // Iconic rounded canopy roof (#facc15 warm gold + white highlight)
+  roundRect(ctx, -size * 0.36, -size * 0.2, size * 0.72, size * 0.92, size * 0.16);
+  const roofGrad = ctx.createLinearGradient(-size * 0.36, 0, size * 0.36, 0);
+  roofGrad.addColorStop(0, "#fde047");
+  roofGrad.addColorStop(0.5, "#fef08a");
+  roofGrad.addColorStop(1, "#eab308");
+  ctx.fillStyle = roofGrad;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+  ctx.shadowBlur = size * 0.18;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(1, size * 0.035);
+  ctx.stroke();
+
+  // Canopy rib lines
+  ctx.strokeStyle = "rgba(161, 98, 7, 0.45)";
+  ctx.lineWidth = Math.max(0.8, size * 0.028);
+  for (const ry of [size * 0.06, size * 0.36]) {
+    ctx.beginPath();
+    ctx.moveTo(-size * 0.32, ry);
+    ctx.lineTo(size * 0.32, ry);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function draw3DBike(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string,
+  time: number
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  const sway = Math.sin(time * 9) * size * 0.03;
+
+  // Drop shadow
+  ctx.save();
+  ctx.translate(size * 0.1, size * 0.14);
+  roundRect(ctx, -size * 0.18, -size * 0.84, size * 0.36, size * 1.68, size * 0.16);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.42)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.42)";
+  ctx.shadowBlur = size * 0.22;
+  ctx.fill();
+  ctx.restore();
+
+  drawWakeTrail(ctx, size * 0.58, size * 1.15, size * 0.08, accentColor);
+
+  // Front & rear bicycle wheels (-Y and +Y)
+  ctx.fillStyle = "#0f172a";
+  ctx.strokeStyle = "#e2e8f0";
+  ctx.lineWidth = Math.max(0.8, size * 0.028);
+  roundRect(ctx, -size * 0.055, -size * 0.88, size * 0.11, size * 0.42, size * 0.05);
+  ctx.fill();
+  ctx.stroke();
+  roundRect(ctx, -size * 0.055, size * 0.44, size * 0.11, size * 0.42, size * 0.05);
+  ctx.fill();
+  ctx.stroke();
+
+  // Bicycle top-tube frame
+  ctx.strokeStyle = accentColor;
+  ctx.lineWidth = Math.max(2, size * 0.085);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.46);
+  ctx.lineTo(0, size * 0.52);
+  ctx.stroke();
+
+  // Handlebars (-Y)
+  ctx.strokeStyle = "#f8fafc";
+  ctx.lineWidth = Math.max(1.6, size * 0.065);
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.36, -size * 0.38);
+  ctx.quadraticCurveTo(0, -size * 0.46, size * 0.36, -size * 0.38);
+  ctx.stroke();
+
+  // Cyclist shoulders & arms reaching to bars
+  ctx.fillStyle = accentColor;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(1, size * 0.035);
+  ctx.beginPath();
+  ctx.ellipse(sway, size * 0.08, size * 0.28, size * 0.16, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.strokeStyle = "#f8fafc";
+  ctx.lineWidth = Math.max(1.4, size * 0.055);
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.24 + sway, size * 0.04);
+  ctx.lineTo(-size * 0.32, -size * 0.38);
+  ctx.moveTo(size * 0.24 + sway, size * 0.04);
+  ctx.lineTo(size * 0.32, -size * 0.38);
+  ctx.stroke();
+
+  // Aero cycling helmet pointing -Y
+  ctx.beginPath();
+  ctx.moveTo(sway, -size * 0.3);
+  ctx.bezierCurveTo(size * 0.2 + sway, -size * 0.26, size * 0.19 + sway, size * 0.06, sway, size * 0.12);
+  ctx.bezierCurveTo(-size * 0.19 + sway, size * 0.06, -size * 0.2 + sway, -size * 0.26, sway, -size * 0.3);
+  ctx.closePath();
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.strokeStyle = "#0f172a";
+  ctx.lineWidth = Math.max(0.9, size * 0.035);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function draw3DWalker(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string,
+  time: number
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  const stride = Math.sin(time * 7.5) * size * 0.22;
+
+  // Trailing footprints behind hiker (+Y)
+  ctx.fillStyle = "rgba(248, 250, 252, 0.45)";
+  ctx.beginPath();
+  ctx.ellipse(-size * 0.14, size * 0.64, size * 0.065, size * 0.11, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(size * 0.14, size * 0.92, size * 0.065, size * 0.11, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Drop shadow
+  ctx.save();
+  ctx.translate(size * 0.1, size * 0.14);
+  ctx.beginPath();
+  ctx.arc(0, 0, size * 0.36, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.46)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = size * 0.24;
+  ctx.fill();
+  ctx.restore();
+
+  // Stepping boots (-Y forward stride)
+  ctx.fillStyle = "#0f172a";
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(0.8, size * 0.03);
+  ctx.beginPath();
+  ctx.ellipse(-size * 0.16, -size * 0.24 + stride, size * 0.095, size * 0.18, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(size * 0.16, -size * 0.24 - stride, size * 0.095, size * 0.18, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Shoulders / jacket (facing -Y)
+  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = "#0f172a";
+  ctx.lineWidth = Math.max(1, size * 0.038);
+  roundRect(ctx, -size * 0.38, -size * 0.18, size * 0.76, size * 0.34, size * 0.16);
+  ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+  ctx.shadowBlur = size * 0.18;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.stroke();
+
+  // Backpack on back (+Y)
+  roundRect(ctx, -size * 0.26, size * 0.06, size * 0.52, size * 0.36, size * 0.1);
+  ctx.fillStyle = accentColor;
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(0.9, size * 0.032);
+  ctx.stroke();
+
+  // Hiker head & cap visor pointing -Y
+  ctx.beginPath();
+  ctx.ellipse(0, -size * 0.28, size * 0.16, size * 0.12, 0, 0, Math.PI * 2);
+  ctx.fillStyle = accentColor;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(0, -size * 0.12, size * 0.2, 0, Math.PI * 2);
+  ctx.fillStyle = "#f8fafc";
+  ctx.fill();
+  ctx.strokeStyle = "#0f172a";
+  ctx.lineWidth = Math.max(1, size * 0.038);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawBoatHullPath(ctx: CanvasRenderingContext2D, s: number) {
+  const w = s * 0.34;
+  ctx.beginPath();
+  // Pointed ship bow (-Y)
+  ctx.moveTo(0, -s * 0.92);
+  ctx.bezierCurveTo(w * 0.92, -s * 0.55, w, -s * 0.1, w * 0.92, s * 0.72);
+  // Rounded transom stern (+Y)
+  ctx.quadraticCurveTo(0, s * 0.82, -w * 0.92, s * 0.72);
+  ctx.bezierCurveTo(-w, -s * 0.1, -w * 0.92, -s * 0.55, 0, -s * 0.92);
+  ctx.closePath();
+}
+
+function draw3DBoat(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  // V-shaped ocean foam bow wake & stern wake (+Y)
+  for (const side of [-1, 1]) {
+    const wakeGrad = ctx.createLinearGradient(0, -size * 0.55, side * size * 0.72, size * 1.25);
+    wakeGrad.addColorStop(0, "rgba(255, 255, 255, 0.78)");
+    wakeGrad.addColorStop(0.5, "rgba(125, 211, 252, 0.42)");
+    wakeGrad.addColorStop(1, "rgba(56, 189, 248, 0)");
+    ctx.strokeStyle = wakeGrad;
+    ctx.lineWidth = Math.max(1.5, size * 0.075);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(side * size * 0.1, -size * 0.52);
+    ctx.quadraticCurveTo(side * size * 0.42, size * 0.2, side * size * 0.68, size * 1.18);
+    ctx.stroke();
+  }
+  drawWakeTrail(ctx, size * 0.65, size * 1.38, size * 0.16, accentColor);
+
+  // Drop shadow
+  ctx.save();
+  ctx.translate(size * 0.12, size * 0.16);
+  drawBoatHullPath(ctx, size * 0.98);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
+  ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+  ctx.shadowBlur = size * 0.28;
+  ctx.fill();
+  ctx.restore();
+
+  // Main ship hull
+  drawBoatHullPath(ctx, size);
+  const hullGrad = ctx.createLinearGradient(-size * 0.34, 0, size * 0.34, 0);
+  hullGrad.addColorStop(0, "#dbeafe");
+  hullGrad.addColorStop(0.48, "#ffffff");
+  hullGrad.addColorStop(1, "#cbd5e1");
+  ctx.fillStyle = hullGrad;
+  ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
+  ctx.shadowBlur = size * 0.22;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = accentColor;
+  ctx.lineWidth = Math.max(1.1, size * 0.042);
+  ctx.stroke();
+
+  // Foredeck center line
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.7)";
+  ctx.lineWidth = Math.max(0.9, size * 0.03);
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.84);
+  ctx.lineTo(0, -size * 0.32);
+  ctx.stroke();
+
+  // Tiered bridge superstructure
+  ctx.beginPath();
+  ctx.moveTo(0, -size * 0.38);
+  ctx.quadraticCurveTo(size * 0.23, -size * 0.28, size * 0.23, size * 0.52);
+  ctx.lineTo(-size * 0.23, size * 0.52);
+  ctx.quadraticCurveTo(-size * 0.23, -size * 0.28, 0, -size * 0.38);
+  ctx.closePath();
+  ctx.fillStyle = "#f8fafc";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(100, 116, 139, 0.5)";
+  ctx.lineWidth = Math.max(0.8, size * 0.028);
+  ctx.stroke();
+
+  // Wrap-around dark navigation bridge windows (-Y)
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.19, -size * 0.16);
+  ctx.quadraticCurveTo(0, -size * 0.32, size * 0.19, -size * 0.16);
+  ctx.strokeStyle = "#0f172a";
+  ctx.lineWidth = Math.max(1.8, size * 0.065);
+  ctx.lineCap = "round";
+  ctx.stroke();
+
+  // Ship funnel with accent band
+  ctx.beginPath();
+  ctx.ellipse(0, size * 0.18, size * 0.1, size * 0.16, 0, 0, Math.PI * 2);
+  ctx.fillStyle = accentColor;
+  ctx.fill();
+  ctx.strokeStyle = "#0f172a";
+  ctx.lineWidth = Math.max(1, size * 0.035);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawDirectionalDotHead(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  bearingRad: number,
+  size: number,
+  accentColor: string
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(bearingRad);
+
+  drawWakeTrail(ctx, size * 0.1, size * 0.95, size * 0.18, accentColor);
+
+  ctx.beginPath();
+  ctx.arc(0, 0, size * 0.26, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.shadowColor = accentColor;
+  ctx.shadowBlur = size * 0.45;
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.4, size * 0.06);
+  ctx.strokeStyle = accentColor;
+  ctx.stroke();
+
+  ctx.restore();
 }
 
 export function drawFrame(
@@ -888,40 +1994,22 @@ export function drawFrame(
   });
 
   // 8. Moving 3D Airplane / Vehicle Model along the active trajectory
-  if (frame.head && frame.icon && frame.legIndex != null) {
+  if (frame.head && frame.transport && frame.icon && frame.legIndex != null) {
     const xy = projection(frame.head);
     if (xy) {
-      // Compute screen-space tangent angle so the 3D airplane points accurately along the projected curve
+      // Compute screen-space tangent angle so the 3D vehicle points accurately along the projected curve
       const pathCoords = paths[frame.legIndex] ?? [];
       const u = frame.legProgress ?? 0.5;
-      const p1 = projection(pointAlong(pathCoords, Math.max(0, u - 0.02)));
-      const p2 = projection(pointAlong(pathCoords, Math.min(1, u + 0.02)));
+      const u1 = Math.max(0, Math.min(0.97, u - 0.02));
+      const u2 = Math.min(1, Math.max(u1 + 0.03, u + 0.02));
+      const p1 = projection(pointAlong(pathCoords, u1)) ?? xy;
+      const p2 = projection(pointAlong(pathCoords, u2)) ?? xy;
       const screenAngle =
         p1 && p2 && Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) > 0.5
           ? Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) + Math.PI / 2
           : frame.headBearing;
 
-      if (frame.transport === "plane") {
-        draw3DAirplane(ctx, xy[0], xy[1], screenAngle, Math.max(18, w / 34), line);
-      } else {
-        // Clean badge with transport icon for land/sea vehicles
-        const badgeR = Math.max(13, w / 52);
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(xy[0], xy[1], badgeR, 0, Math.PI * 2);
-        ctx.fillStyle = line;
-        ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
-        ctx.shadowBlur = 10;
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = "#ffffff";
-        ctx.stroke();
-        ctx.font = `${Math.round(badgeR * 1.15)}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(frame.icon, xy[0], xy[1] + 1);
-        ctx.restore();
-      }
+      drawTransportVehicle(ctx, frame.transport, xy[0], xy[1], screenAngle, Math.max(18, w / 34), line, time);
     }
   }
 
