@@ -9,6 +9,12 @@ interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
 }
 
+declare global {
+  interface Window {
+    __meridianDeferredPrompt?: BeforeInstallPromptEvent | null;
+  }
+}
+
 const DISMISS_KEY = "meridian-pwa-banner-dismissed";
 const DISMISS_DAYS = 7;
 
@@ -40,11 +46,11 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
   const [isMobile, setIsMobile] = useState(false);
   const [isIos, setIsIos] = useState(false);
   const [dismissed, setDismissed] = useState(true);
-  const [showIosGuide, setShowIosGuide] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [updateToast, setUpdateToast] = useState(false);
   const refreshingRef = useRef(false);
 
-  // Detect mobile device, standalone mode, and beforeinstallprompt
+  // Detect mobile device, standalone mode, and beforeinstallprompt immediately on homepage
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -68,6 +74,10 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
     checkEnvironment();
     setDismissed(isBannerDismissed());
 
+    if (window.__meridianDeferredPrompt) {
+      setDeferredPrompt(window.__meridianDeferredPrompt);
+    }
+
     const mediaQuery = window.matchMedia("(display-mode: standalone)");
     const onChange = () => checkEnvironment();
     mediaQuery.addEventListener?.("change", onChange);
@@ -75,25 +85,36 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
     const onBeforeInstallPrompt = (e: Event) => {
       const ua = window.navigator.userAgent || "";
       const isMobileDevice =
-        /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+        /Android|iPhone|iPad|iPod|Mobile|Opera Mini|IEMobile/i.test(ua) ||
         window.matchMedia("(max-width: 820px) and (pointer: coarse)").matches;
       if (!isMobileDevice) return;
       e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
+      const promptEvent = e as BeforeInstallPromptEvent;
+      window.__meridianDeferredPrompt = promptEvent;
+      setDeferredPrompt(promptEvent);
+    };
+
+    const onEarlyPromptReady = () => {
+      if (window.__meridianDeferredPrompt) {
+        setDeferredPrompt(window.__meridianDeferredPrompt);
+      }
     };
 
     const onAppInstalled = () => {
+      window.__meridianDeferredPrompt = null;
       setDeferredPrompt(null);
       setIsStandalone(true);
-      setShowIosGuide(false);
+      setShowInstallGuide(false);
     };
 
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener("meridian:pwa-prompt-ready", onEarlyPromptReady);
     window.addEventListener("appinstalled", onAppInstalled);
 
     return () => {
       mediaQuery.removeEventListener?.("change", onChange);
       window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("meridian:pwa-prompt-ready", onEarlyPromptReady);
       window.removeEventListener("appinstalled", onAppInstalled);
     };
   }, []);
@@ -157,13 +178,16 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const handleInstallClick = useCallback(async () => {
-    if (deferredPrompt) {
-      await deferredPrompt.prompt();
+    const promptEvent = deferredPrompt || (typeof window !== "undefined" ? window.__meridianDeferredPrompt : null);
+    if (promptEvent) {
+      await promptEvent.prompt();
       try {
-        const choice = await deferredPrompt.userChoice;
+        const choice = await promptEvent.userChoice;
         if (choice.outcome === "accepted") {
+          window.__meridianDeferredPrompt = null;
           setDeferredPrompt(null);
           setIsStandalone(true);
+          setShowInstallGuide(false);
         } else {
           dismissBannerForWeek();
           setDismissed(true);
@@ -173,18 +197,16 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
       }
       return;
     }
-    if (isIos) {
-      setShowIosGuide((prev) => !prev);
-    }
-  }, [deferredPrompt, isIos]);
+    setShowInstallGuide((prev) => !prev);
+  }, [deferredPrompt]);
 
   const handleDismiss = useCallback(() => {
     dismissBannerForWeek();
     setDismissed(true);
-    setShowIosGuide(false);
+    setShowInstallGuide(false);
   }, []);
 
-  const showMobilePrompt = isMobile && !isStandalone && !dismissed && (Boolean(deferredPrompt) || isIos);
+  const showMobilePrompt = isMobile && !isStandalone && !dismissed;
 
   return (
     <>
@@ -216,7 +238,7 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
                 className="btn primary sm"
                 onClick={() => void handleInstallClick()}
               >
-                {showIosGuide ? "Done" : "Install"}
+                {showInstallGuide ? "Done" : "Install"}
               </button>
               <button
                 type="button"
@@ -229,14 +251,27 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
             </div>
           </div>
 
-          {showIosGuide && isIos ? (
+          {showInstallGuide ? (
             <div className="pwa-ios-inline-steps">
-              <span>
-                1. Tap <strong>Share</strong> <kbd className="pwa-kbd">⎋</kbd> in Safari
-              </span>
-              <span>
-                2. Tap <strong>Add to Home Screen</strong> <kbd className="pwa-kbd">＋</kbd>
-              </span>
+              {isIos ? (
+                <>
+                  <span>
+                    1. Tap <strong>Share</strong> <kbd className="pwa-kbd">⎋</kbd> in Safari
+                  </span>
+                  <span>
+                    2. Tap <strong>Add to Home Screen</strong> <kbd className="pwa-kbd">＋</kbd>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>
+                    1. Tap browser menu <kbd className="pwa-kbd">⋮</kbd>
+                  </span>
+                  <span>
+                    2. Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>
+                  </span>
+                </>
+              )}
             </div>
           ) : null}
         </div>

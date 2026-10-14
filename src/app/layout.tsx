@@ -63,6 +63,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const session = await getServerSession(authOptions);
   return (
     <html lang="en">
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{window.__meridianDeferredPrompt=null;window.addEventListener("beforeinstallprompt",function(e){var ua=navigator.userAgent||"";var m=/Android|iPhone|iPad|iPod|Mobile|Opera Mini|IEMobile/i.test(ua)||(window.matchMedia&&window.matchMedia("(max-width: 820px) and (pointer: coarse)").matches);if(!m)return;e.preventDefault();window.__meridianDeferredPrompt=e;window.dispatchEvent(new Event("meridian:pwa-prompt-ready"));});if("serviceWorker"in navigator){navigator.serviceWorker.register("/sw.js",{scope:"/",updateViaCache:"none"}).catch(function(){});}}catch(_){}})();`,
+          }}
+        />
+      </head>
       <body className={inter.className}>
         <Providers session={session}>{children}</Providers>
       </body>

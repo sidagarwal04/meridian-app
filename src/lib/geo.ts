@@ -45,18 +45,11 @@ export function greatCircle(a: LatLng, b: LatLng, steps = 72): [number, number][
   return pts;
 }
 
-export function pathKm(coords: [number, number][]) {
-  let km = 0;
-  for (let i = 1; i < coords.length; i++) {
-    km += haversineKm({ lon: coords[i - 1][0], lat: coords[i - 1][1] }, { lon: coords[i][0], lat: coords[i][1] });
-  }
-  return km;
-}
+const pathMetricsCache = new WeakMap<[number, number][], { lengths: number[]; total: number }>();
 
-export function pointAlong(coords: [number, number][], u: number): [number, number] {
-  if (coords.length === 0) return [0, 0];
-  if (coords.length === 1 || u <= 0) return coords[0];
-  if (u >= 1) return coords[coords.length - 1];
+function getPathMetrics(coords: [number, number][]): { lengths: number[]; total: number } {
+  const cached = pathMetricsCache.get(coords);
+  if (cached) return cached;
   const lengths: number[] = [];
   let total = 0;
   for (let i = 1; i < coords.length; i++) {
@@ -64,6 +57,20 @@ export function pointAlong(coords: [number, number][], u: number): [number, numb
     lengths.push(d);
     total += d;
   }
+  const metrics = { lengths, total };
+  pathMetricsCache.set(coords, metrics);
+  return metrics;
+}
+
+export function pathKm(coords: [number, number][]) {
+  return getPathMetrics(coords).total;
+}
+
+export function pointAlong(coords: [number, number][], u: number): [number, number] {
+  if (coords.length === 0) return [0, 0];
+  if (coords.length === 1 || u <= 0) return coords[0];
+  if (u >= 1) return coords[coords.length - 1];
+  const { lengths, total } = getPathMetrics(coords);
   let target = u * total;
   for (let i = 0; i < lengths.length; i++) {
     if (target <= lengths[i] || i === lengths.length - 1) {
@@ -87,13 +94,7 @@ export function slicePath(coords: [number, number][], u: number): [number, numbe
   if (u >= 1) return coords;
   const head = pointAlong(coords, u);
   const out: [number, number][] = [];
-  const lengths: number[] = [];
-  let total = 0;
-  for (let i = 1; i < coords.length; i++) {
-    const d = haversineKm({ lon: coords[i - 1][0], lat: coords[i - 1][1] }, { lon: coords[i][0], lat: coords[i][1] });
-    lengths.push(d);
-    total += d;
-  }
+  const { lengths, total } = getPathMetrics(coords);
   let target = u * total;
   out.push(coords[0]);
   for (let i = 0; i < lengths.length; i++) {

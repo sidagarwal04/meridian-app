@@ -1,4 +1,5 @@
-const CACHE_VERSION = "meridian-pwa-v1";
+const CACHE_VERSION = "meridian-pwa-v2";
+const CORE_INSTALL_ASSETS = ["/icon.svg"];
 const STATIC_ASSETS = [
   "/icon.svg",
   "/countries-110m.json",
@@ -7,12 +8,17 @@ const STATIC_ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
-  // Activate updated service worker immediately
+  // Activate immediately without blocking on large map topology JSON files
+  // so mobile browsers fire beforeinstallprompt on the homepage right away.
   self.skipWaiting();
   event.waitUntil(
     caches
       .open(CACHE_VERSION)
-      .then((cache) => cache.addAll(STATIC_ASSETS))
+      .then((cache) => {
+        // Warm heavy topology assets in background without delaying install completion
+        cache.addAll(STATIC_ASSETS).catch(() => {});
+        return cache.addAll(CORE_INSTALL_ASSETS);
+      })
       .catch(() => {})
   );
 });

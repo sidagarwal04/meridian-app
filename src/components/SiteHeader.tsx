@@ -115,9 +115,17 @@ export function SiteHeader({ showNav = true }: { showNav?: boolean }) {
           </Link>
         )}
         {user && open ? (
-          <div className="menu-panel">
+          <div className="menu-panel" role="menu">
+            <Link
+              href="/videos"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+            >
+              🧭 {t("myVideos")}
+            </Link>
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 signOut();
                 setOpen(false);

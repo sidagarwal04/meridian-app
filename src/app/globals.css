@@ -208,11 +208,12 @@ img {
   position: absolute;
   top: 64px;
   right: 28px;
+  z-index: 200;
   background: rgba(15, 23, 42, 0.96);
   backdrop-filter: blur(20px);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
-  min-width: 150px;
+  min-width: 185px;
   padding: 6px;
   display: grid;
   gap: 2px;
@@ -221,6 +222,9 @@ img {
 
 .menu-panel a,
 .menu-panel button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-align: left;
   background: transparent;
   border: 0;
@@ -228,6 +232,7 @@ img {
   border-radius: 10px;
   font-size: 14px;
   color: #e2e8f0;
+  white-space: nowrap;
 }
 
 .menu-panel a:hover,

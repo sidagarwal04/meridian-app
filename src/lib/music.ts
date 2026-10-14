@@ -80,11 +80,27 @@ export type AudioSession = {
 let shared: AudioContext | null = null;
 let noiseBufferCache: AudioBuffer | null = null;
 let pinkNoiseBufferCache: AudioBuffer | null = null;
+let dotLoopBufferCache: AudioBuffer | null = null;
+let trainLoopBufferCache: AudioBuffer | null = null;
+let bikeLoopBufferCache: AudioBuffer | null = null;
+let walkLoopBufferCache: AudioBuffer | null = null;
+const grooveBufferCache = new Map<string, AudioBuffer>();
+const grooveRenderPromises = new Map<string, Promise<AudioBuffer | null>>();
 let activePreviewStop: (() => void) | null = null;
 let unlockBound = false;
 
 function ctx() {
-  if (!shared) shared = new AudioContext();
+  if (!shared) {
+    const AudioCtx =
+      window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    try {
+      // "playback" latencyHint allocates a larger hardware buffer on mobile browsers,
+      // preventing audio underruns/stuttering while the 3D WebGL/2D canvas renders at 60fps.
+      shared = new AudioCtx({ latencyHint: "playback" });
+    } catch {
+      shared = new AudioCtx();
+    }
+  }
   if (!unlockBound && typeof window !== "undefined") {
     unlockBound = true;
     const resumeOnGesture = () => {
@@ -93,6 +109,9 @@ function ctx() {
       }
     };
     window.addEventListener("pointerdown", resumeOnGesture, { passive: true });
+    window.addEventListener("touchstart", resumeOnGesture, { passive: true });
+    window.addEventListener("touchend", resumeOnGesture, { passive: true });
+    window.addEventListener("click", resumeOnGesture, { passive: true });
     window.addEventListener("keydown", resumeOnGesture, { passive: true });
   }
   return shared;
@@ -109,12 +128,14 @@ export function unlockAudio() {
     if (audio.state === "suspended") {
       audio.resume().catch(() => {});
     }
+    // Pre-warm default background soundtrack buffer off-thread so playback starts with zero lag
+    void getOrRenderGrooveBuffer(audio, "ambient");
   } catch {
     /* ignore */
   }
 }
 
-function getWhiteNoiseBuffer(audio: AudioContext): AudioBuffer {
+function getWhiteNoiseBuffer(audio: BaseAudioContext): AudioBuffer {
   if (noiseBufferCache && noiseBufferCache.sampleRate === audio.sampleRate) {
     return noiseBufferCache;
   }
@@ -128,7 +149,7 @@ function getWhiteNoiseBuffer(audio: AudioContext): AudioBuffer {
   return buf;
 }
 
-function getPinkNoiseBuffer(audio: AudioContext): AudioBuffer {
+function getPinkNoiseBuffer(audio: BaseAudioContext): AudioBuffer {
   if (pinkNoiseBufferCache && pinkNoiseBufferCache.sampleRate === audio.sampleRate) {
     return pinkNoiseBufferCache;
   }
@@ -154,6 +175,116 @@ function getPinkNoiseBuffer(audio: AudioContext): AudioBuffer {
     b6 = white * 0.115926;
   }
   pinkNoiseBufferCache = buf;
+  return buf;
+}
+
+function getDotPopLoopBuffer(audio: BaseAudioContext): AudioBuffer {
+  if (dotLoopBufferCache && dotLoopBufferCache.sampleRate === audio.sampleRate) {
+    return dotLoopBufferCache;
+  }
+  const sr = audio.sampleRate;
+  const stepInterval = 0.13;
+  const loopDur = stepInterval * 4;
+  const len = Math.round(sr * loopDur);
+  const buf = audio.createBuffer(1, len, sr);
+  const data = buf.getChannelData(0);
+  for (let step = 0; step < 4; step++) {
+    const startSample = Math.round(step * stepInterval * sr);
+    const popSamples = Math.round(0.062 * sr);
+    const f0 = 580 + step * 75;
+    const f1 = f0 * 0.48;
+    let phase = 0;
+    for (let i = 0; i < popSamples && startSample + i < len; i++) {
+      const u = i / popSamples;
+      const freq = f0 * Math.pow(f1 / f0, u);
+      phase += (2 * Math.PI * freq) / sr;
+      const env = u < 0.13 ? (u / 0.13) * 0.075 : 0.075 * Math.pow(0.01, (u - 0.13) / 0.87);
+      data[startSample + i] += Math.sin(phase) * env;
+    }
+  }
+  dotLoopBufferCache = buf;
+  return buf;
+}
+
+function getTrainClackLoopBuffer(audio: BaseAudioContext): AudioBuffer {
+  if (trainLoopBufferCache && trainLoopBufferCache.sampleRate === audio.sampleRate) {
+    return trainLoopBufferCache;
+  }
+  const sr = audio.sampleRate;
+  const pairPeriod = 0.34;
+  const len = Math.round(sr * pairPeriod);
+  const buf = audio.createBuffer(1, len, sr);
+  const data = buf.getChannelData(0);
+  const hits = [
+    { offset: 0.05, peak: 0.18 },
+    { offset: 0.135, peak: 0.14 },
+  ];
+  for (const hit of hits) {
+    const startSample = Math.round(hit.offset * sr);
+    const hitSamples = Math.round(0.042 * sr);
+    for (let i = 0; i < hitSamples && startSample + i < len; i++) {
+      const u = i / hitSamples;
+      const env = u < 0.12 ? (u / 0.12) * hit.peak : hit.peak * Math.pow(0.008, (u - 0.12) / 0.88);
+      const tone = Math.sin((2 * Math.PI * 980 * i) / sr) * 0.55;
+      const noise = (Math.random() * 2 - 1) * 0.45;
+      data[startSample + i] += (tone + noise) * env;
+    }
+  }
+  trainLoopBufferCache = buf;
+  return buf;
+}
+
+function getBikeClickLoopBuffer(audio: BaseAudioContext): AudioBuffer {
+  if (bikeLoopBufferCache && bikeLoopBufferCache.sampleRate === audio.sampleRate) {
+    return bikeLoopBufferCache;
+  }
+  const sr = audio.sampleRate;
+  const clickPeriod = 0.075;
+  const loopDur = clickPeriod * 2;
+  const len = Math.round(sr * loopDur);
+  const buf = audio.createBuffer(1, len, sr);
+  const data = buf.getChannelData(0);
+  for (let c = 0; c < 2; c++) {
+    const startSample = Math.round(c * clickPeriod * sr);
+    const clickSamples = Math.round(0.016 * sr);
+    const freq = 2600 + c * 200;
+    for (let i = 0; i < clickSamples && startSample + i < len; i++) {
+      const u = i / clickSamples;
+      const env = u < 0.15 ? (u / 0.15) * 0.022 : 0.022 * Math.pow(0.02, (u - 0.15) / 0.85);
+      data[startSample + i] += Math.sin((2 * Math.PI * freq * i) / sr) * env;
+    }
+  }
+  bikeLoopBufferCache = buf;
+  return buf;
+}
+
+function getWalkStepLoopBuffer(audio: BaseAudioContext): AudioBuffer {
+  if (walkLoopBufferCache && walkLoopBufferCache.sampleRate === audio.sampleRate) {
+    return walkLoopBufferCache;
+  }
+  const sr = audio.sampleRate;
+  const stepPeriod = 0.25;
+  const loopDur = stepPeriod * 2;
+  const len = Math.round(sr * loopDur);
+  const buf = audio.createBuffer(1, len, sr);
+  const data = buf.getChannelData(0);
+  const pink = getPinkNoiseBuffer(audio).getChannelData(0);
+  for (let s = 0; s < 2; s++) {
+    const startSample = Math.round((s * stepPeriod + 0.02) * sr);
+    const stepSamples = Math.round(0.078 * sr);
+    const f0 = s === 0 ? 135 : 122;
+    let phase = 0;
+    for (let i = 0; i < stepSamples && startSample + i < len; i++) {
+      const u = i / stepSamples;
+      const freq = f0 * Math.pow(48 / f0, u);
+      phase += (2 * Math.PI * freq) / sr;
+      const thudEnv = u < 0.12 ? (u / 0.12) * 0.09 : 0.09 * Math.pow(0.01, (u - 0.12) / 0.88);
+      const crunchEnv = u > 0.1 ? Math.sin(((u - 0.1) / 0.9) * Math.PI) * 0.18 : 0;
+      const pinkSample = pink[(startSample + i) % pink.length];
+      data[startSample + i] += Math.sin(phase) * thudEnv + pinkSample * crunchEnv;
+    }
+  }
+  walkLoopBufferCache = buf;
   return buf;
 }
 
@@ -299,20 +430,13 @@ export function playTransportSoundOnNode(
     bp.connect(sg);
     sg.connect(bus);
 
-    const stepInterval = 0.13;
-    const steps = Math.max(3, Math.floor((dur - 0.1) / stepInterval));
-    for (let i = 0; i < steps; i++) {
-      const t0 = i * stepInterval;
-      const pitch = 580 + (i % 4) * 75;
-      const pop = startOsc("sine", pitch, t0, t0 + 0.065);
-      pop.frequency.exponentialRampToValueAtTime(pitch * 0.48, now + t0 + 0.06);
-      const pg = audio.createGain();
-      pg.gain.setValueAtTime(0.001, now + t0);
-      pg.gain.linearRampToValueAtTime(0.075, now + t0 + 0.008);
-      pg.gain.exponentialRampToValueAtTime(0.0008, now + t0 + 0.062);
-      pop.connect(pg);
-      pg.connect(bus);
-    }
+    const popLoop = audio.createBufferSource();
+    popLoop.buffer = getDotPopLoopBuffer(audio);
+    popLoop.loop = true;
+    popLoop.start(now);
+    popLoop.stop(now + dur + 0.02);
+    sources.push(popLoop);
+    popLoop.connect(bus);
   } else if (transport === "helicopter") {
     // Rhythmic rotor blade chop-chop-chop (12.5 Hz LFO modulating noise & sub-thump) + turbine
     const rotorNoise = startNoise(true);
@@ -384,34 +508,14 @@ export function playTransportSoundOnNode(
     railLp.connect(railGain);
     railGain.connect(bus);
 
-    // 3. Rhythmic "clack-clack ... clack-clack" track joint hits
-    const pairPeriod = 0.34;
-    const pairs = Math.max(2, Math.floor(dur / pairPeriod));
-    for (let p = 0; p < pairs; p++) {
-      [0, 0.085].forEach((offset, hitIdx) => {
-        const tHit = p * pairPeriod + offset + 0.05;
-        if (tHit + 0.05 > dur) return;
-        const clickSrc = audio.createBufferSource();
-        clickSrc.buffer = getWhiteNoiseBuffer(audio);
-        clickSrc.start(now + tHit);
-        clickSrc.stop(now + tHit + 0.045);
-        sources.push(clickSrc);
-
-        const bp = audio.createBiquadFilter();
-        bp.type = "bandpass";
-        bp.Q.value = 4.2;
-        bp.frequency.value = hitIdx === 0 ? 1150 : 920;
-
-        const cg = audio.createGain();
-        cg.gain.setValueAtTime(0.001, now + tHit);
-        cg.gain.linearRampToValueAtTime(hitIdx === 0 ? 0.22 : 0.17, now + tHit + 0.005);
-        cg.gain.exponentialRampToValueAtTime(0.001, now + tHit + 0.042);
-
-        clickSrc.connect(bp);
-        bp.connect(cg);
-        cg.connect(bus);
-      });
-    }
+    // 3. Rhythmic "clack-clack ... clack-clack" track joint hits (single looped buffer)
+    const clackLoop = audio.createBufferSource();
+    clackLoop.buffer = getTrainClackLoopBuffer(audio);
+    clackLoop.loop = true;
+    clackLoop.start(now);
+    clackLoop.stop(now + dur + 0.02);
+    sources.push(clackLoop);
+    clackLoop.connect(bus);
   } else if (transport === "boat") {
     // 1. Deep resonant ship foghorn at departure
     const hornDur = Math.min(0.85, dur * 0.48);
@@ -640,57 +744,23 @@ export function playTransportSoundOnNode(
       });
     });
 
-    // 2. Rapid light freewheel hub ratcheting clicks ("tick-tick-tick")
-    const clickPeriod = 0.075;
-    const clicks = Math.floor(dur / clickPeriod);
-    for (let c = 0; c < clicks; c++) {
-      const tClick = c * clickPeriod;
-      const tick = startOsc("triangle", 2600 + (c % 2) * 200, tClick, tClick + 0.018);
-      const tg = audio.createGain();
-      tg.gain.setValueAtTime(0.0005, now + tClick);
-      tg.gain.linearRampToValueAtTime(0.022, now + tClick + 0.002);
-      tg.gain.exponentialRampToValueAtTime(0.0005, now + tClick + 0.016);
-      tick.connect(tg);
-      tg.connect(bus);
-    }
+    // 2. Rapid light freewheel hub ratcheting clicks ("tick-tick-tick") via single looped buffer
+    const clickLoop = audio.createBufferSource();
+    clickLoop.buffer = getBikeClickLoopBuffer(audio);
+    clickLoop.loop = true;
+    clickLoop.start(now);
+    clickLoop.stop(now + dur + 0.02);
+    sources.push(clickLoop);
+    clickLoop.connect(bus);
   } else if (transport === "walk") {
-    // Rhythmic alternating footsteps on trail + soft outdoor breeze
-    const stepPeriod = 0.25;
-    const steps = Math.max(2, Math.floor(dur / stepPeriod));
-    for (let s = 0; s < steps; s++) {
-      const tStep = s * stepPeriod + 0.02;
-      if (tStep + 0.09 > dur) continue;
-      const isLeft = s % 2 === 0;
-
-      // Low heel thud
-      const thud = startOsc("sine", isLeft ? 135 : 122, tStep, tStep + 0.075);
-      thud.frequency.exponentialRampToValueAtTime(48, now + tStep + 0.07);
-      const tg = audio.createGain();
-      tg.gain.setValueAtTime(0.001, now + tStep);
-      tg.gain.linearRampToValueAtTime(0.09, now + tStep + 0.008);
-      tg.gain.exponentialRampToValueAtTime(0.001, now + tStep + 0.072);
-      thud.connect(tg);
-      tg.connect(bus);
-
-      // Crisp gravel/sole crunch
-      const crunch = audio.createBufferSource();
-      crunch.buffer = getPinkNoiseBuffer(audio);
-      crunch.start(now + tStep + 0.01);
-      crunch.stop(now + tStep + 0.085);
-      sources.push(crunch);
-
-      const bp = audio.createBiquadFilter();
-      bp.type = "bandpass";
-      bp.Q.value = 2.0;
-      bp.frequency.value = isLeft ? 1250 : 1420;
-      const cg = audio.createGain();
-      cg.gain.setValueAtTime(0.001, now + tStep + 0.01);
-      cg.gain.linearRampToValueAtTime(0.16, now + tStep + 0.022);
-      cg.gain.exponentialRampToValueAtTime(0.001, now + tStep + 0.08);
-      crunch.connect(bp);
-      bp.connect(cg);
-      cg.connect(bus);
-    }
+    // Rhythmic alternating footsteps on trail + soft outdoor breeze via single looped buffer
+    const stepLoop = audio.createBufferSource();
+    stepLoop.buffer = getWalkStepLoopBuffer(audio);
+    stepLoop.loop = true;
+    stepLoop.start(now);
+    stepLoop.stop(now + dur + 0.02);
+    sources.push(stepLoop);
+    stepLoop.connect(bus);
   }
 
   return {
@@ -815,84 +885,78 @@ function midiToFreq(midi: number): number {
   return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
-/**
- * Starts a lively, beat-driven procedural groove for the given MusicId.
- * Uses a 16th-note drum & synth sequencer with kick, snare/clap, hi-hats,
- * groovy bassline, chords, and catchy lead hooks.
- */
-function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): { stop: () => void } {
-  const musicBus = audio.createGain();
-  musicBus.gain.setValueAtTime(0.001, audio.currentTime);
-  musicBus.gain.linearRampToValueAtTime(0.82, audio.currentTime + 0.12);
-  musicBus.connect(dest);
+function createGrooveStepScheduler(
+  audio: BaseAudioContext,
+  musicBus: AudioNode,
+  id: MusicId
+): { bpm: number; scheduleStep: (step: number, when: number) => void } {
+  const whiteBuf = getWhiteNoiseBuffer(audio);
 
-  const playKick = (vol = 0.24, punch = 155, endFreq = 44, dur = 0.18) => {
-    const t = audio.currentTime;
+  const playKick = (when: number, vol = 0.24, punch = 155, endFreq = 44, dur = 0.18) => {
     const osc = audio.createOscillator();
     const g = audio.createGain();
     osc.type = "sine";
-    osc.frequency.setValueAtTime(punch, t);
-    osc.frequency.exponentialRampToValueAtTime(endFreq, t + dur);
-    g.gain.setValueAtTime(vol, t);
-    g.gain.exponentialRampToValueAtTime(0.0008, t + dur + 0.02);
+    osc.frequency.setValueAtTime(punch, when);
+    osc.frequency.exponentialRampToValueAtTime(endFreq, when + dur);
+    g.gain.setValueAtTime(vol, when);
+    g.gain.exponentialRampToValueAtTime(0.0008, when + dur + 0.02);
     osc.connect(g);
     g.connect(musicBus);
-    osc.start(t);
-    osc.stop(t + dur + 0.03);
+    osc.start(when);
+    osc.stop(when + dur + 0.03);
   };
 
-  const playSnare = (vol = 0.13, toneHz = 185, decay = 0.13, clap = false) => {
-    const t = audio.currentTime;
+  const playSnare = (when: number, vol = 0.13, toneHz = 185, decay = 0.13, clap = false) => {
     const noise = audio.createBufferSource();
-    noise.buffer = getWhiteNoiseBuffer(audio);
+    noise.buffer = whiteBuf;
     const filter = audio.createBiquadFilter();
     filter.type = clap ? "bandpass" : "highpass";
-    filter.frequency.value = clap ? 1350 : 950;
-    if (clap) filter.Q.value = 1.8;
+    filter.frequency.setValueAtTime(clap ? 1350 : 950, when);
+    if (clap) filter.Q.setValueAtTime(1.8, when);
 
     const ng = audio.createGain();
-    ng.gain.setValueAtTime(vol, t);
-    ng.gain.exponentialRampToValueAtTime(0.0008, t + decay);
+    ng.gain.setValueAtTime(vol, when);
+    ng.gain.exponentialRampToValueAtTime(0.0008, when + decay);
     noise.connect(filter);
     filter.connect(ng);
     ng.connect(musicBus);
-    noise.start(t);
-    noise.stop(t + decay + 0.02);
+    noise.start(when);
+    noise.stop(when + decay + 0.02);
 
     if (!clap) {
       const body = audio.createOscillator();
       const bg = audio.createGain();
       body.type = "triangle";
-      body.frequency.setValueAtTime(toneHz, t);
-      body.frequency.exponentialRampToValueAtTime(85, t + 0.08);
-      bg.gain.setValueAtTime(vol * 0.65, t);
-      bg.gain.exponentialRampToValueAtTime(0.0008, t + 0.09);
+      body.frequency.setValueAtTime(toneHz, when);
+      body.frequency.exponentialRampToValueAtTime(85, when + 0.08);
+      bg.gain.setValueAtTime(vol * 0.65, when);
+      bg.gain.exponentialRampToValueAtTime(0.0008, when + 0.09);
       body.connect(bg);
       bg.connect(musicBus);
-      body.start(t);
-      body.stop(t + 0.1);
+      body.start(when);
+      body.stop(when + 0.1);
     }
   };
 
-  const playHat = (vol = 0.045, open = false) => {
-    const t = audio.currentTime;
+  const playHat = (when: number, vol = 0.045, open = false) => {
     const dur = open ? 0.17 : 0.042;
     const src = audio.createBufferSource();
-    src.buffer = getWhiteNoiseBuffer(audio);
+    src.buffer = whiteBuf;
     const hp = audio.createBiquadFilter();
     hp.type = "highpass";
-    hp.frequency.value = 6800;
+    hp.frequency.setValueAtTime(6800, when);
     const g = audio.createGain();
-    g.gain.setValueAtTime(vol, t);
-    g.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+    g.gain.setValueAtTime(vol, when);
+    g.gain.exponentialRampToValueAtTime(0.0005, when + dur);
     src.connect(hp);
     hp.connect(g);
     g.connect(musicBus);
-    src.start(t);
-    src.stop(t + dur + 0.01);
+    src.start(when);
+    src.stop(when + dur + 0.01);
   };
 
   const playNote = (
+    when: number,
     midi: number,
     type: OscillatorType,
     vol: number,
@@ -901,36 +965,35 @@ function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): {
     detuneCents = 0
   ) => {
     if (midi <= 0) return;
-    const t = audio.currentTime;
     const freq = midiToFreq(midi);
     const osc = audio.createOscillator();
     osc.type = type;
-    osc.frequency.setValueAtTime(freq, t);
-    if (detuneCents) osc.detune.setValueAtTime(detuneCents, t);
+    osc.frequency.setValueAtTime(freq, when);
+    if (detuneCents) osc.detune.setValueAtTime(detuneCents, when);
 
     const filter = audio.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(cutoff, t);
-    filter.frequency.exponentialRampToValueAtTime(Math.max(240, cutoff * 0.38), t + dur);
+    filter.frequency.setValueAtTime(cutoff, when);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(240, cutoff * 0.38), when + dur);
 
     const g = audio.createGain();
-    g.gain.setValueAtTime(0.0008, t);
-    g.gain.linearRampToValueAtTime(vol, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0006, t + dur);
+    g.gain.setValueAtTime(0.0008, when);
+    g.gain.linearRampToValueAtTime(vol, when + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0006, when + dur);
 
     osc.connect(filter);
     filter.connect(g);
     g.connect(musicBus);
-    osc.start(t);
-    osc.stop(t + dur + 0.02);
+    osc.start(when);
+    osc.stop(when + dur + 0.02);
   };
 
-  const playChord = (midis: number[], type: OscillatorType, vol: number, dur: number, cutoff = 1800) => {
-    midis.forEach((m, i) => playNote(m, type, vol, dur, cutoff, (i - 1) * 5));
+  const playChord = (when: number, midis: number[], type: OscillatorType, vol: number, dur: number, cutoff = 1800) => {
+    midis.forEach((m, i) => playNote(when, m, type, vol, dur, cutoff, (i - 1) * 5));
   };
 
   let bpm = 118;
-  let tickStep = (_s: number) => {};
+  let scheduleStep = (_step: number, _when: number) => {};
 
   if (id === "ambient") {
     // "Sunlit Horizon" — Upbeat Indie-Pop Travel Groove (C - G - Am - F, 118 BPM)
@@ -947,32 +1010,32 @@ function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): {
       72, 0, 76, 0, 79, 0, 76, 72, 74, 0, 79, 0, 83, 0, 79, 0,
       76, 0, 79, 0, 81, 0, 79, 76, 77, 0, 76, 72, 74, 0, 67, 0,
     ];
-    tickStep = (step) => {
+    scheduleStep = (step, when) => {
       const bar = Math.floor(step / 16) % 4;
       const s = step % 16;
       const root = bassRoots[bar];
 
       // Four-on-the-floor kick + bouncy syncopated ghost kick
-      if (s % 4 === 0 || s === 14) playKick(0.22, 150, 46, 0.16);
-      if (s === 4 || s === 12) playSnare(0.12, 190, 0.12, true);
-      if (s % 2 === 0) playHat(s % 4 === 2 ? 0.055 : 0.03, s % 4 === 2);
+      if (s % 4 === 0 || s === 14) playKick(when, 0.22, 150, 46, 0.16);
+      if (s === 4 || s === 12) playSnare(when, 0.12, 190, 0.12, true);
+      if (s % 2 === 0) playHat(when, s % 4 === 2 ? 0.055 : 0.03, s % 4 === 2);
 
       // Driving pop bassline
       if (s === 0 || s === 3 || s === 6 || s === 8 || s === 10 || s === 14) {
         const oct = s === 6 || s === 14 ? 12 : 0;
-        playNote(root + oct, "sawtooth", 0.085, 0.16, 680);
+        playNote(when, root + oct, "sawtooth", 0.085, 0.16, 680);
       }
 
       // Off-beat sunny chord stabs
       if (s === 2 || s === 6 || s === 10 || s === 14) {
-        playChord(chords[bar], "triangle", 0.032, 0.18, 2200);
+        playChord(when, chords[bar], "triangle", 0.032, 0.18, 2200);
       }
 
       // Plucky lead melody
       const note = leadPattern[step % 32];
       if (note > 0) {
-        playNote(note, "triangle", 0.065, 0.2, 3400);
-        playNote(note + 12, "sine", 0.025, 0.14, 4200);
+        playNote(when, note, "triangle", 0.065, 0.2, 3400);
+        playNote(when, note + 12, "sine", 0.025, 0.14, 4200);
       }
     };
   } else if (id === "tropical") {
@@ -983,26 +1046,26 @@ function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): {
       65, 69, 72, 69, 77, 0, 72, 69, 62, 65, 69, 65, 74, 0, 69, 65,
       70, 74, 77, 74, 81, 0, 77, 74, 72, 76, 79, 76, 84, 79, 76, 72,
     ];
-    tickStep = (step) => {
+    scheduleStep = (step, when) => {
       const bar = Math.floor(step / 16) % 4;
       const s = step % 16;
 
-      if (s % 4 === 0) playKick(0.21, 140, 45, 0.17);
+      if (s % 4 === 0) playKick(when, 0.21, 140, 45, 0.17);
       // Dembow / tropical rim-clap on 3, 6, 11, 14 & backbeat
-      if (s === 4 || s === 12) playSnare(0.1, 220, 0.1, true);
-      if (s === 3 || s === 6 || s === 11 || s === 14) playHat(0.05, true);
-      else if (s % 2 === 1) playHat(0.028, false);
+      if (s === 4 || s === 12) playSnare(when, 0.1, 220, 0.1, true);
+      if (s === 3 || s === 6 || s === 11 || s === 14) playHat(when, 0.05, true);
+      else if (s % 2 === 1) playHat(when, 0.028, false);
 
       // Warm sub-bass bounce
       if (s === 0 || s === 3 || s === 7 || s === 10 || s === 14) {
-        playNote(bassRoots[bar], "triangle", 0.11, 0.2, 520);
+        playNote(when, bassRoots[bar], "triangle", 0.11, 0.2, 520);
       }
 
       // Steel-drum / Marimba lead (fundamental + 4th harmonic overtone)
       const mNote = marimbaSeq[step % 32];
       if (mNote > 0) {
-        playNote(mNote, "sine", 0.075, 0.16, 3600);
-        playNote(mNote + 19, "triangle", 0.026, 0.08, 4000);
+        playNote(when, mNote, "sine", 0.075, 0.16, 3600);
+        playNote(when, mNote + 19, "triangle", 0.026, 0.08, 4000);
       }
     };
   } else if (id === "funk") {
@@ -1018,25 +1081,25 @@ function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): {
       [62, 66, 69, 73],
       [63, 66, 69, 75],
     ];
-    tickStep = (step) => {
+    scheduleStep = (step, when) => {
       const bar = Math.floor(step / 16) % 4;
       const s = step % 16;
 
-      if (s % 4 === 0) playKick(0.24, 160, 44, 0.16);
-      if (s === 4 || s === 12) playSnare(0.14, 200, 0.13, true);
+      if (s % 4 === 0) playKick(when, 0.24, 160, 44, 0.16);
+      if (s === 4 || s === 12) playSnare(when, 0.14, 200, 0.13, true);
       // Disco open hi-hat on the "&" of every beat
-      if (s % 4 === 2) playHat(0.065, true);
-      else playHat(0.025, false);
+      if (s % 4 === 2) playHat(when, 0.065, true);
+      else playHat(when, 0.025, false);
 
       // Funky octave slap-bass
       const bNote = bassLine[step % 32];
       if (bNote > 0) {
-        playNote(bNote, "sawtooth", 0.095, 0.13, 1450);
+        playNote(when, bNote, "sawtooth", 0.095, 0.13, 1450);
       }
 
       // Syncopated brassy synth stabs
       if (s === 0 || s === 3 || s === 6 || s === 11 || s === 14) {
-        playChord(brassChords[bar], "sawtooth", 0.028, 0.14, 2600);
+        playChord(when, brassChords[bar], "sawtooth", 0.028, 0.14, 2600);
       }
     };
   } else if (id === "synthwave") {
@@ -1049,21 +1112,21 @@ function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): {
       [67, 72, 76, 79, 76, 72, 67, 76],
       [67, 71, 74, 79, 74, 71, 67, 74],
     ];
-    tickStep = (step) => {
+    scheduleStep = (step, when) => {
       const bar = Math.floor(step / 16) % 4;
       const s = step % 16;
 
-      if (s % 4 === 0) playKick(0.25, 165, 42, 0.17);
-      if (s === 4 || s === 12) playSnare(0.15, 175, 0.18, false);
-      if (s % 2 === 0) playHat(0.04, s % 4 === 2);
+      if (s % 4 === 0) playKick(when, 0.25, 165, 42, 0.17);
+      if (s === 4 || s === 12) playSnare(when, 0.15, 175, 0.18, false);
+      if (s % 2 === 0) playHat(when, 0.04, s % 4 === 2);
 
       // Rolling 16th-note octave synth bass
       const bassNote = roots[bar] + (s % 2 === 1 ? 12 : 0);
-      playNote(bassNote, "sawtooth", 0.08, 0.11, 920);
+      playNote(when, bassNote, "sawtooth", 0.08, 0.11, 920);
 
       // Sparkling 16th-note neon arpeggio
       const arp = arpNotes[bar][s % 8];
-      playNote(arp, "square", 0.036, 0.12, 2900, 6);
+      playNote(when, arp, "square", 0.036, 0.12, 2900, 6);
     };
   } else if (id === "arcade") {
     // "8-Bit World Tour" — Hyper-Fun Chiptune Adventure Lead (C - G - Am - F, 136 BPM)
@@ -1073,22 +1136,22 @@ function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): {
       72, 76, 79, 84, 79, 76, 72, 0, 74, 79, 83, 86, 83, 79, 74, 0,
       76, 81, 84, 88, 84, 81, 76, 0, 77, 81, 84, 89, 88, 84, 79, 76,
     ];
-    tickStep = (step) => {
+    scheduleStep = (step, when) => {
       const bar = Math.floor(step / 16) % 4;
       const s = step % 16;
 
-      if (s % 4 === 0 || s === 10) playKick(0.2, 180, 52, 0.12);
-      if (s === 4 || s === 12) playSnare(0.11, 240, 0.09, false);
-      if (s % 2 === 0) playHat(0.035, false);
+      if (s % 4 === 0 || s === 10) playKick(when, 0.2, 180, 52, 0.12);
+      if (s === 4 || s === 12) playSnare(when, 0.11, 240, 0.09, false);
+      if (s % 2 === 0) playHat(when, 0.035, false);
 
       // Jumping octave triangle bass
       const bPitch = bassRoots[bar] + (s % 4 >= 2 ? 12 : 0);
-      if (s % 2 === 0) playNote(bPitch, "triangle", 0.1, 0.1, 1600);
+      if (s % 2 === 0) playNote(when, bPitch, "triangle", 0.1, 0.1, 1600);
 
       // Square-wave chiptune melody
       const cNote = chipLead[step % 32];
       if (cNote > 0) {
-        playNote(cNote, "square", 0.045, 0.1, 3800);
+        playNote(when, cNote, "square", 0.045, 0.1, 3800);
       }
     };
   } else if (id === "folk") {
@@ -1105,32 +1168,30 @@ function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): {
       79, 0, 81, 83, 79, 0, 74, 0, 76, 0, 79, 76, 72, 0, 0, 0,
       79, 0, 81, 83, 86, 0, 83, 79, 81, 0, 78, 74, 79, 0, 0, 0,
     ];
-    tickStep = (step) => {
+    scheduleStep = (step, when) => {
       const bar = Math.floor(step / 16) % 4;
       const s = step % 16;
 
       // Stomp-clap roadtrip rhythm
-      if (s === 0 || s === 8) playKick(0.22, 130, 46, 0.17);
-      if (s === 4 || s === 12) playSnare(0.12, 210, 0.11, true);
-      if (s % 2 === 0) playHat(s % 4 === 2 ? 0.05 : 0.025, s % 4 === 2);
+      if (s === 0 || s === 8) playKick(when, 0.22, 130, 46, 0.17);
+      if (s === 4 || s === 12) playSnare(when, 0.12, 210, 0.11, true);
+      if (s % 2 === 0) playHat(when, s % 4 === 2 ? 0.05 : 0.025, s % 4 === 2);
 
       // Alternating country/folk root-fifth bass
-      if (s === 0 || s === 8) playNote(roots[bar], "triangle", 0.1, 0.22, 600);
-      if (s === 4 || s === 12) playNote(roots[bar] + 7, "triangle", 0.085, 0.18, 600);
+      if (s === 0 || s === 8) playNote(when, roots[bar], "triangle", 0.1, 0.22, 600);
+      if (s === 4 || s === 12) playNote(when, roots[bar] + 7, "triangle", 0.085, 0.18, 600);
 
-      // Brisk acoustic strum pattern (D - D U - U D U)
+      // Brisk acoustic strum pattern (D - D U - U D U) scheduled on audio clock (zero setTimeout jitter!)
       if ([0, 4, 6, 10, 12, 14].includes(s)) {
         strumChords[bar].forEach((n, idx) => {
-          window.setTimeout(() => {
-            playNote(n, "triangle", 0.028, 0.16, 2600);
-          }, idx * 11);
+          playNote(when + idx * 0.011, n, "triangle", 0.028, 0.16, 2600);
         });
       }
 
       // Cheerful high whistle hook
       const wNote = whistleMelody[step % 32];
       if (wNote > 0) {
-        playNote(wNote, "sine", 0.068, 0.24, 3800);
+        playNote(when, wNote, "sine", 0.068, 0.24, 3800);
       }
     };
   } else if (id === "lofi") {
@@ -1147,26 +1208,26 @@ function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): {
       74, 0, 72, 69, 0, 65, 69, 72, 71, 0, 67, 62, 0, 0, 67, 71,
       72, 0, 71, 67, 64, 0, 67, 71, 69, 0, 73, 76, 73, 69, 64, 0,
     ];
-    tickStep = (step) => {
+    scheduleStep = (step, when) => {
       const bar = Math.floor(step / 16) % 4;
       const s = step % 16;
 
       // Boom-bap swung kick & crisp snare
-      if (s === 0 || s === 7 || s === 10) playKick(0.24, 135, 42, 0.19);
-      if (s === 4 || s === 12) playSnare(0.13, 180, 0.11, false);
-      if (s % 2 === 0) playHat(0.038, s === 14);
+      if (s === 0 || s === 7 || s === 10) playKick(when, 0.24, 135, 42, 0.19);
+      if (s === 4 || s === 12) playSnare(when, 0.13, 180, 0.11, false);
+      if (s % 2 === 0) playHat(when, 0.038, s === 14);
 
       if (s === 0 || s === 7 || s === 10 || s === 14) {
-        playNote(roots[bar], "sine", 0.12, 0.24, 480);
+        playNote(when, roots[bar], "sine", 0.12, 0.24, 480);
       }
 
       if (s === 0 || s === 6 || s === 11) {
-        playChord(rhodesChords[bar], "sine", 0.036, 0.35, 1600);
+        playChord(when, rhodesChords[bar], "sine", 0.036, 0.35, 1600);
       }
 
       const lNote = lofiHook[step % 32];
       if (lNote > 0) {
-        playNote(lNote, "triangle", 0.055, 0.22, 2400);
+        playNote(when, lNote, "triangle", 0.055, 0.22, 2400);
       }
     };
   } else if (id === "cinematic") {
@@ -1177,39 +1238,171 @@ function startGrooveEngine(audio: AudioContext, dest: AudioNode, id: MusicId): {
       62, 0, 69, 0, 74, 0, 72, 69, 70, 0, 65, 0, 74, 0, 72, 0,
       69, 0, 72, 0, 77, 0, 76, 72, 76, 0, 79, 0, 84, 0, 79, 0,
     ];
-    tickStep = (step) => {
+    scheduleStep = (step, when) => {
       const bar = Math.floor(step / 16) % 4;
       const s = step % 16;
 
       // Epic taiko / stadium toms & snare march
       if (s === 0 || s === 3 || s === 6 || s === 8 || s === 12) {
-        playKick(0.25, 145, 40, 0.2);
+        playKick(when, 0.25, 145, 40, 0.2);
       }
       if (s === 4 || s === 12 || s === 15) {
-        playSnare(0.14, 165, 0.16, false);
+        playSnare(when, 0.14, 165, 0.16, false);
       }
-      if (s % 2 === 0) playHat(0.04, s === 14);
+      if (s % 2 === 0) playHat(when, 0.04, s === 14);
 
       // Spiccato string ostinato on 16th notes
       const ostinato = roots[bar] + 12 + (s % 2 === 0 ? 0 : 7);
-      playNote(ostinato, "sawtooth", 0.055, 0.12, 1150);
+      playNote(when, ostinato, "sawtooth", 0.055, 0.12, 1150);
 
       // Soaring heroic brass melody
       const aNote = anthemLead[step % 32];
       if (aNote > 0) {
-        playNote(aNote, "sawtooth", 0.06, 0.28, 2400, -4);
-        playNote(aNote - 12, "sawtooth", 0.045, 0.28, 1800, 4);
+        playNote(when, aNote, "sawtooth", 0.06, 0.28, 2400, -4);
+        playNote(when, aNote - 12, "sawtooth", 0.045, 0.28, 1800, 4);
       }
     };
   }
 
-  const stepMs = Math.round((60 / bpm / 4) * 1000);
-  let stepCounter = 0;
-  // Trigger step 0 immediately so music starts with zero lag
-  tickStep(stepCounter++);
-  const timer = window.setInterval(() => {
-    tickStep(stepCounter++);
-  }, stepMs);
+  return { bpm, scheduleStep };
+}
+
+function getBpmForTrack(id: MusicId): number {
+  switch (id) {
+    case "ambient":
+      return 118;
+    case "tropical":
+      return 116;
+    case "funk":
+      return 120;
+    case "synthwave":
+      return 126;
+    case "arcade":
+      return 136;
+    case "folk":
+      return 114;
+    case "lofi":
+      return 94;
+    case "cinematic":
+      return 112;
+    default:
+      return 118;
+  }
+}
+
+/**
+ * Pre-renders a 64-step (4-bar) groove loop into a cached AudioBuffer off the main thread
+ * using OfflineAudioContext so mobile playback runs on a single hardware-looped AudioBufferSourceNode
+ * with zero main-thread timer jitter and zero live oscillator/filter allocations.
+ */
+async function getOrRenderGrooveBuffer(audio: AudioContext, id: MusicId): Promise<AudioBuffer | null> {
+  if (id === "none") return null;
+  const cacheKey = `${id}:${audio.sampleRate}`;
+  const cached = grooveBufferCache.get(cacheKey);
+  if (cached) return cached;
+
+  const inflight = grooveRenderPromises.get(cacheKey);
+  if (inflight) return inflight;
+
+  const task = (async (): Promise<AudioBuffer | null> => {
+    try {
+      const OfflineCtx =
+        window.OfflineAudioContext ||
+        (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext }).webkitOfflineAudioContext;
+      if (!OfflineCtx) return null;
+
+      const sr = audio.sampleRate;
+      const bpm = getBpmForTrack(id);
+      const stepSec = 60 / bpm / 4;
+      const preRollSteps = 4;
+      const loopSteps = 64;
+      const totalSteps = preRollSteps + loopSteps;
+      const totalSamples = Math.ceil(totalSteps * stepSec * sr);
+      const offline = new OfflineCtx(1, totalSamples, sr);
+
+      const { scheduleStep } = createGrooveStepScheduler(offline, offline.destination, id);
+      for (let i = 0; i < totalSteps; i++) {
+        const stepIdx = (loopSteps - preRollSteps + i) % loopSteps;
+        scheduleStep(stepIdx, i * stepSec);
+      }
+
+      const rendered = await offline.startRendering();
+      const preRollSamples = Math.round(preRollSteps * stepSec * sr);
+      const loopSamples = Math.min(rendered.length - preRollSamples, Math.round(loopSteps * stepSec * sr));
+      const loopBuffer = audio.createBuffer(1, loopSamples, sr);
+      loopBuffer
+        .getChannelData(0)
+        .set(rendered.getChannelData(0).subarray(preRollSamples, preRollSamples + loopSamples));
+
+      grooveBufferCache.set(cacheKey, loopBuffer);
+      return loopBuffer;
+    } catch {
+      return null;
+    } finally {
+      grooveRenderPromises.delete(cacheKey);
+    }
+  })();
+
+  grooveRenderPromises.set(cacheKey, task);
+  return task;
+}
+
+/**
+ * Starts a lively, beat-driven procedural groove for the given MusicId.
+ * Plays from a pre-rendered seamless AudioBuffer loop on the Web Audio thread (or a hardware-clock
+ * lookahead scheduler fallback) so mobile 3D canvas rendering never lags or stutters the music.
+ */
+function startGrooveEngine(
+  audio: AudioContext,
+  dest: AudioNode,
+  id: MusicId,
+  preRenderedLoop: AudioBuffer | null
+): { stop: () => void } {
+  const musicBus = audio.createGain();
+  musicBus.gain.setValueAtTime(0.001, audio.currentTime);
+  musicBus.gain.linearRampToValueAtTime(0.82, audio.currentTime + 0.12);
+  musicBus.connect(dest);
+
+  if (preRenderedLoop) {
+    const loopSource = audio.createBufferSource();
+    loopSource.buffer = preRenderedLoop;
+    loopSource.loop = true;
+    loopSource.connect(musicBus);
+    loopSource.start(audio.currentTime);
+
+    return {
+      stop: () => {
+        const t = audio.currentTime;
+        try {
+          musicBus.gain.cancelScheduledValues(t);
+          musicBus.gain.setValueAtTime(Math.max(0.0001, musicBus.gain.value), t);
+          musicBus.gain.linearRampToValueAtTime(0.0001, t + 0.12);
+          loopSource.stop(t + 0.14);
+        } catch {
+          /* ignore */
+        }
+      },
+    };
+  }
+
+  // Fallback: Web Audio hardware-clock lookahead scheduler (schedules 0.45s ahead on audio.currentTime)
+  const { bpm, scheduleStep } = createGrooveStepScheduler(audio, musicBus, id);
+  const stepSec = 60 / bpm / 4;
+  const LOOKAHEAD_SEC = 0.45;
+  let nextStep = 0;
+  const startTime = audio.currentTime + 0.02;
+
+  const pumpLookahead = () => {
+    const horizon = audio.currentTime + LOOKAHEAD_SEC;
+    while (startTime + nextStep * stepSec <= horizon) {
+      const when = Math.max(audio.currentTime, startTime + nextStep * stepSec);
+      scheduleStep(nextStep, when);
+      nextStep++;
+    }
+  };
+
+  pumpLookahead();
+  const timer = window.setInterval(pumpLookahead, 140);
 
   return {
     stop: () => {
@@ -1248,6 +1441,9 @@ export async function createAudioSession(options: {
       /* autoplay policy may defer until user gesture */
     }
   }
+  const preRenderedLoop =
+    options.music !== "none" ? await getOrRenderGrooveBuffer(audio, options.music) : null;
+
   const master = audio.createGain();
   master.gain.value = 0.9;
   const dest = audio.createMediaStreamDestination();
@@ -1255,7 +1451,8 @@ export async function createAudioSession(options: {
   master.connect(dest);
 
   let currentLegHandle: { stop: () => void } | null = null;
-  const groove = options.music !== "none" ? startGrooveEngine(audio, master, options.music) : null;
+  const groove =
+    options.music !== "none" ? startGrooveEngine(audio, master, options.music, preRenderedLoop) : null;
 
   return {
     dest,
