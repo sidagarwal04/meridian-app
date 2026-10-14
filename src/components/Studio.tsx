@@ -8,7 +8,7 @@ import { countVisitedPlaces, flagEmoji, haversineKm, nearestCity } from "@/lib/g
 import { parseGeoJson, parseGpx, parseItinerary, parseKml, placesFromGoogleUrl, simplifyTrack } from "@/lib/parse";
 import { encodeRoute } from "@/lib/share";
 import { TRACKS, playMusicPreview, playTransportPreview, unlockAudio } from "@/lib/music";
-import { getCachedProjectSync, getProject, saveProject } from "@/lib/storage";
+import { getCachedProjectSync, getInMemoryProjectSync, getProject, saveProject } from "@/lib/storage";
 import { TEMPLATES } from "@/lib/templates";
 import {
   EXPORT_FORMATS,
@@ -29,6 +29,7 @@ import {
   type ThemeId,
   type Transport,
 } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 import { useAuth } from "./AuthProvider";
 import { GlobeStage, type GlobeHandle } from "./GlobeStage";
 import { Logo } from "./Logo";
@@ -83,8 +84,9 @@ export function Studio() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { ready, user } = useAuth();
+  const { t } = useI18n();
   const [project, setProject] = useState<Project | null>(() => {
-    const syncHit = getCachedProjectSync(params.id);
+    const syncHit = getInMemoryProjectSync(params.id);
     return syncHit ? sanitizeProject(syncHit) : null;
   });
   const [tab, setTab] = useState<Tab>("route");
@@ -116,6 +118,7 @@ export function Studio() {
   const inlineGlobe = useRef<GlobeHandle>(null);
   const limits = limitsFor(null);
   const booted = useRef(false);
+  const lastSavedRef = useRef<Project | null>(null);
 
   exportingRef.current = exporting;
 
@@ -130,6 +133,18 @@ export function Studio() {
   );
 
   useEffect(() => {
+    const cached = getCachedProjectSync(params.id);
+    if (cached) {
+      setProject((prev) => {
+        if (prev) return prev;
+        const sanitized = sanitizeProject(cached);
+        lastSavedRef.current = sanitized;
+        return sanitized;
+      });
+    }
+  }, [params.id]);
+
+  useEffect(() => {
     if (!ready) return;
     if (!user) {
       router.replace(`/login?next=/studio/${params.id}`);
@@ -140,13 +155,17 @@ export function Studio() {
       if (!active) return;
       setProject((prev) => {
         if (prev && prev.updatedAt >= cloudUpdated.updatedAt) return prev;
-        return sanitizeProject(cloudUpdated);
+        const sanitized = sanitizeProject(cloudUpdated);
+        lastSavedRef.current = sanitized;
+        return sanitized;
       });
     }).then((found) => {
       if (!active) return;
       if (!found) router.replace("/videos");
       else {
-        setProject(sanitizeProject(found));
+        const sanitized = sanitizeProject(found);
+        lastSavedRef.current = sanitized;
+        setProject(sanitized);
         booted.current = true;
       }
     });
@@ -157,7 +176,11 @@ export function Studio() {
 
   useEffect(() => {
     if (!booted.current || !project) return;
-    const timer = window.setTimeout(() => saveProject(project), 400);
+    if (project === lastSavedRef.current) return;
+    const timer = window.setTimeout(() => {
+      lastSavedRef.current = project;
+      void saveProject(project);
+    }, 400);
     return () => window.clearTimeout(timer);
   }, [project]);
 
@@ -719,7 +742,7 @@ export function Studio() {
             Export Video
           </button>
           <Link href="/videos" className="btn ghost sm">
-            Library
+            {t("myVideos")}
           </Link>
         </div>
       </header>

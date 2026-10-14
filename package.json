@@ -2,7 +2,7 @@
   "name": "meridian",
   "version": "1.0.0",
   "private": true,
-  "description": "Turn a trip into a clear map animation for sharing or presenting.",
+  "description": "Turn any journey into a cinematic 3D globe or 2D map animation ready for sharing or presenting.",
   "homepage": "https://meridian.meetsid.dev/",
   "license": "MIT",
   "scripts": {

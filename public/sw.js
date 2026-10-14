@@ -5,6 +5,7 @@ const STATIC_ASSETS = [
   "/countries-110m.json",
   "/countries-50m.json",
   "/country-meta.json",
+  "/earth-sdf.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -55,11 +56,13 @@ self.addEventListener("fetch", (event) => {
   // Never cache API routes or NextAuth endpoints
   if (url.pathname.startsWith("/api/")) return;
 
-  // Cache-first for static country topology & icons, with background revalidation
+  // Cache-first for static country topology, relief texture & icons, with background revalidation
   if (STATIC_ASSETS.includes(url.pathname)) {
     event.respondWith(
       caches.open(CACHE_VERSION).then(async (cache) => {
-        const cached = await cache.match(request);
+        const cached =
+          (await cache.match(request)) ||
+          (await cache.match(url.pathname, { ignoreSearch: true }));
         const networkPromise = fetch(request)
           .then((res) => {
             if (res && res.ok) {

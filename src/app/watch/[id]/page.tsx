@@ -6,15 +6,22 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { GlobeStage } from "@/components/GlobeStage";
 import { PageShell } from "@/components/PageShell";
-import { getCachedProjectSync, getProject } from "@/lib/storage";
+import { getCachedProjectSync, getInMemoryProjectSync, getProject } from "@/lib/storage";
 import type { Project } from "@/lib/types";
 
 export default function Page() {
   const params = useParams<{ id: string }>();
   const { ready } = useAuth();
   const [project, setProject] = useState<Project | null | undefined>(
-    () => getCachedProjectSync(params.id) ?? undefined
+    () => getInMemoryProjectSync(params.id) ?? undefined
   );
+
+  useEffect(() => {
+    const cached = getCachedProjectSync(params.id);
+    if (cached) {
+      setProject((prev) => prev ?? cached);
+    }
+  }, [params.id]);
 
   useEffect(() => {
     if (!ready) return;
@@ -35,7 +42,7 @@ export default function Page() {
         {project === undefined ? <p className="center">Loading…</p> : null}
         {project === null ? (
           <p className="center">
-            Project not found in your library or local browser storage. <Link href="/videos">Back to your library</Link>
+            Project not found in your library or local browser storage. <Link href="/videos">Back to My Meridians</Link>
           </p>
         ) : null}
         {project ? (

@@ -68,7 +68,7 @@ export function PricingView() {
             </p>
             <div className="hero-actions">
               <Link className="btn primary lg" href={ctaHref}>
-                ✦ {user ? "Open My Expeditions →" : "Sign in with Google →"}
+                ✦ {user ? "Open My Meridians →" : "Sign in with Google →"}
               </Link>
               <a
                 className="btn ghost lg"

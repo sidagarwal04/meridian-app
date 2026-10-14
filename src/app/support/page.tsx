@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: "Support" };
 const FAQ = [
   [
     "How do I create a travel map video?",
-    "Sign in with Google, open My Expeditions, and click Create Meridian. Search cities or click directly on the interactive globe to add stops, choose transport icons between stops, and click Preview or Export Video.",
+    "Sign in with Google, open My Meridians, and click Create Meridian. Search cities or click directly on the interactive globe to add stops, choose transport icons between stops, and click Preview or Export Video.",
   ],
   [
     "How do I reorder or remove stops on the route?",

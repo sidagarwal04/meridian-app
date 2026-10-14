@@ -128,6 +128,21 @@ function removeFromMemoryCache(id: string) {
   );
 }
 
+export function getInMemoryProjectsSync(): Project[] | null {
+  if (typeof window === "undefined") return null;
+  const email = currentSessionEmail();
+  if (memoryProjects && memoryEmail === email) {
+    return memoryProjects;
+  }
+  return null;
+}
+
+export function getInMemoryProjectSync(id: string): Project | null {
+  const list = getInMemoryProjectsSync();
+  if (!list) return null;
+  return list.find((p) => p.id === id) ?? null;
+}
+
 export function getCachedProjectsSync(): Project[] | null {
   if (typeof window === "undefined") return null;
   const email = currentSessionEmail();
@@ -241,6 +256,8 @@ export function persistSession(user: User, account: Account) {
 }
 
 export function clearSession() {
+  memoryProjects = null;
+  memoryEmail = null;
   localStorage.removeItem(SESSION);
 }
 

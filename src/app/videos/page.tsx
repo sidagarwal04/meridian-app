@@ -11,6 +11,7 @@ import {
   createAndSave,
   deleteProject,
   getCachedProjectsSync,
+  getInMemoryProjectsSync,
   listProjects,
   saveProject,
   subscribeProjects,
@@ -23,8 +24,8 @@ export default function Page() {
   const { ready, user } = useAuth();
   const { t } = useI18n();
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>(() => getCachedProjectsSync() ?? []);
-  const [loading, setLoading] = useState<boolean>(() => getCachedProjectsSync() === null);
+  const [projects, setProjects] = useState<Project[]>(() => getInMemoryProjectsSync() ?? []);
+  const [loading, setLoading] = useState<boolean>(() => getInMemoryProjectsSync() === null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -166,15 +167,15 @@ export default function Page() {
         ) : loading ? (
           <div className="empty-library-card">
             <span className="feature-icon" style={{ margin: "0 auto" }}>🧭</span>
-            <h2>Loading your expeditions…</h2>
+            <h2>Loading your Meridians…</h2>
           </div>
         ) : (
           <div className="empty-library-card">
             <span className="feature-icon" style={{ margin: "0 auto" }}>🌍</span>
-            <h2>No expeditions yet</h2>
+            <h2>No Meridians yet</h2>
             <p>Start with a blank globe or pick one of the curated templates below to launch the Studio.</p>
             <button className="btn primary lg" onClick={create} disabled={busy || !user}>
-              ✦ Create your first expedition
+              ✦ Create your first Meridian
             </button>
           </div>
         )}

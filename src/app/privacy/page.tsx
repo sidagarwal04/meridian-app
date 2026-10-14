@@ -46,7 +46,7 @@ const SECTIONS = [
   {
     num: "05",
     title: "Clearing Data & Signing Out",
-    body: "You are in full control of your local data. Deleting a project in My Videos or clearing browser site data for this origin permanently removes the videos stored on this device. Signing out immediately ends your Google session on this site.",
+    body: "You are in full control of your local data. Deleting a project in My Meridians or clearing browser site data for this origin permanently removes the videos stored on this device. Signing out immediately ends your Google session on this site.",
   },
 ];
 
