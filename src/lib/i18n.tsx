@@ -15,7 +15,7 @@ const DICTS: Record<string, Record<string, string>> = {
     privacy: "Privacy Policy",
     createCta: "Create Meridian",
     viewExamples: "View examples",
-    heroTitle: "Travel map animation",
+    heroTitle: "Your Odysseys, in Motion",
     heroKicker: "Zero-config",
     heroBody: "Turn your trip into a clear, beautiful map animation for sharing or presenting.",
     signIn: "Sign in",

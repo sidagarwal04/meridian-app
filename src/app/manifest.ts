@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Meridian — Travel Map Animations",
+    name: "Meridian — Your Odysseys, in Motion",
     short_name: "Meridian",
     description: "Turn any journey into a cinematic 3D globe or 2D map animation ready for sharing or presenting.",
     start_url: "/",

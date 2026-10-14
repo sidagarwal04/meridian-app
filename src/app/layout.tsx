@@ -16,33 +16,41 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL("https://meridian.meetsid.dev"),
   title: {
-    default: "Meridian — Travel map animations",
+    default: "Meridian — Your Odysseys, in Motion",
     template: "%s · Meridian",
   },
-  description: "Turn your trip into a clear, beautiful map animation for sharing or presenting.",
+  description:
+    "Turn any journey into a cinematic 3D globe video — plot flights, trains, and road trips in seconds.",
   manifest: "/manifest.webmanifest",
   openGraph: {
-    title: "Meridian — Travel map animations",
+    title: "Meridian — Your Odysseys, in Motion",
     description:
-      "Turn every journey into a cinematic 3D map video. Plot flights, high-speed trains, road trips, and sea crossings on an interactive 3D globe.",
+      "Turn any journey into a cinematic 3D globe video — plot flights, trains, and road trips in seconds.",
     url: "https://meridian.meetsid.dev/",
     siteName: "Meridian",
     type: "website",
     images: [
       {
         url: "/og-image.png",
-        width: 1564,
-        height: 676,
-        alt: "Meridian — Turn every journey into a cinematic 3D map video",
+        width: 1200,
+        height: 630,
+        alt: "Meridian — Your Odysseys, in Motion",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Meridian — Travel map animations",
+    title: "Meridian — Your Odysseys, in Motion",
     description:
-      "Turn every journey into a cinematic 3D map video. Plot flights, high-speed trains, road trips, and sea crossings on an interactive 3D globe.",
-    images: ["/og-image.png"],
+      "Turn any journey into a cinematic 3D globe video — plot flights, trains, and road trips in seconds.",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Meridian — Your Odysseys, in Motion",
+      },
+    ],
   },
   appleWebApp: {
     capable: true,
