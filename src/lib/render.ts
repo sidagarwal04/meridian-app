@@ -1,5 +1,14 @@
 import { geoGraticule, geoOrthographic, geoPath, type GeoProjection } from "d3-geo";
-import { countUniqueCities, countUniqueCountries, flagEmoji, internationalCountryName, pathKm, pointAlong, slicePath } from "./geo";
+import {
+  countUniqueCities,
+  countUniqueCountries,
+  flagEmoji,
+  internationalCountryName,
+  isSamePlace,
+  pathKm,
+  pointAlong,
+  slicePath,
+} from "./geo";
 import { drawShaderGlobe } from "./globeShader";
 import { THEMES, transportMeta, type Project, type Style, type ThemeId, type Transport } from "./types";
 import type { CountryShape } from "./world";
@@ -39,19 +48,24 @@ function quinticInOut(t: number) {
   return x < 0.5 ? 16 * x * x * x * x * x : 1 - Math.pow(-2 * x + 2, 5) / 2;
 }
 
-// Continuous distance-aware camera zoom factor so nearby places zoom in deep enough that labels never overlap
-// and short regional hops (e.g. Copenhagen -> Kokkedal -> Helsingor) are clearly visible on the map
+function lerpLog(a: number, b: number, t: number) {
+  const safeA = Math.max(0.1, a);
+  const safeB = Math.max(0.1, b);
+  return Math.exp(Math.log(safeA) + (Math.log(safeB) - Math.log(safeA)) * t);
+}
+
+// Continuous distance-aware camera zoom factor so nearby places & short hops
+// (e.g. Copenhagen -> Kokkedal 31km, Kokkedal -> Helsingør 16km, Helsingør -> Helsingborg 6km)
+// span ~38-45% of the viewport instead of clustering together.
+// Note: On Earth (R = 6371 km), screenFraction ≈ factor * (km / 6371), so factor ≈ 2650 / km for local hops.
 function zoomFor(km: number) {
-  const d = Math.max(4, km || 700);
+  const d = Math.max(2.5, km || 700);
   if (d >= 8500) return 0.5;
-  if (d >= 4500) return 0.5 + ((8500 - d) / 4000) * 0.24; // 0.50 -> 0.74
-  if (d >= 2000) return 0.74 + ((4500 - d) / 2500) * 0.34; // 0.74 -> 1.08
-  if (d >= 900) return 1.08 + ((2000 - d) / 1100) * 0.57; // 1.08 -> 1.65
-  if (d >= 400) return 1.65 + ((900 - d) / 500) * 1.15; // 1.65 -> 2.80
-  if (d >= 150) return 2.8 + ((400 - d) / 250) * 2.2; // 2.80 -> 5.00
-  if (d >= 60) return 5.0 + ((150 - d) / 90) * 4.5; // 5.00 -> 9.50
-  if (d >= 20) return 9.5 + ((60 - d) / 40) * 7.5; // 9.50 -> 17.00
-  return Math.min(26, 17.0 + ((20 - d) / 16) * 9.0); // 17.00 -> 26.00 for very close towns/suburbs
+  if (d >= 4500) return 0.5 + ((8500 - d) / 4000) * 0.28; // 0.50 -> 0.78
+  if (d >= 2000) return 0.78 + ((4500 - d) / 2500) * 0.57; // 0.78 -> 1.35
+  if (d >= 900) return 1.35 + ((2000 - d) / 1100) * 1.6; // 1.35 -> 2.95
+  // Below 900 km, scale inversely with distance so every regional/city/town leg spans ~40-44% of minDim on screen
+  return Math.min(480, 2655 / d);
 }
 
 function fitFactor(stops: Project["stops"]) {
@@ -114,23 +128,33 @@ export function buildSegs(project: Project, paths: [number, number][][]) {
     push("intro", 0, 8);
     return { segs, total: cursor };
   }
+  const legKms = project.legs.map((_, idx) => pathKm(paths[idx] ?? []));
   push("intro", 0, (project.style.startZoom ? 1.35 : 0.25) / speed);
-  push("dwell", 0, dwellOf(project, 0) / speed);
+  push("dwell", 0, dwellOf(project, 0, legKms) / speed);
   project.legs.forEach((_, index) => {
-    const km = pathKm(paths[index] ?? []);
+    const km = legKms[index] ?? 0;
     const dur = Math.min(4.6, Math.max(1.55, (km || 500) / 1100)) / speed;
     push("leg", index, dur);
-    push("dwell", index + 1, dwellOf(project, index + 1) / speed);
+    push("dwell", index + 1, dwellOf(project, index + 1, legKms) / speed);
   });
   push("outro", project.stops.length - 1, (project.style.endZoom || project.style.showFullRouteAtEnd ? 2.25 : 0.85) / speed);
   return { segs, total: cursor };
 }
 
-function dwellOf(project: Project, index: number) {
+function dwellOf(project: Project, index: number, legKms?: number[]) {
   const stop = project.stops[index];
   if (!stop) return 0.65;
   const photos = stop.photos.length;
-  return Math.max(stop.dwellSec || 1.1, photos ? 2.4 + photos * 1.0 : 0.85);
+  let base = Math.max(stop.dwellSec || 1.1, photos ? 2.4 + photos * 1.0 : 0.85);
+  if (legKms && index > 0 && index < legKms.length) {
+    const zPrev = zoomFor(legKms[index - 1] || 700);
+    const zNext = zoomFor(legKms[index] || 700);
+    const ratio = Math.max(zPrev / zNext, zNext / zPrev);
+    if (ratio > 2.5) {
+      base = Math.max(base, 1.35 + Math.min(0.65, Math.log(ratio) * 0.18));
+    }
+  }
+  return base;
 }
 
 export function animationDuration(project: Project, paths: [number, number][][]) {
@@ -172,41 +196,32 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
 
   const legKms = project.legs.map((_, idx) => pathKm(paths[idx] ?? []));
   const totalRouteKm = legKms.reduce((sum, d) => sum + d, 0);
+  const legZooms = legKms.map((d) => zoomFor(d || 700));
 
-  // Compute zoom factor at each stop based on the nearest neighbor / adjacent leg so nearby cities zoom in deeply
-  const stopFactors = stops.map((stop, idx) => {
-    const adjacent: number[] = [];
-    if (idx > 0 && legKms[idx - 1] > 0) adjacent.push(legKms[idx - 1]);
-    if (idx < legKms.length && legKms[idx] > 0) adjacent.push(legKms[idx]);
-    stops.forEach((other, j) => {
-      if (j === idx) return;
-      const d = pathKm([
-        [stop.lon, stop.lat],
-        [other.lon, other.lat],
-      ]);
-      if (d > 0) adjacent.push(d);
-    });
-    const nearestKm = adjacent.length ? Math.min(...adjacent) : 700;
-    return Math.max(zoomFor(nearestKm), 0.72);
-  });
+  // Arrival and departure zoom for each stop so the camera smoothly zooms in/out while paused on a stop,
+  // and stays at the exact right zoom level for each leg (whether 7000 km or 6 km!).
+  const arriveZoomOf = (idx: number) => {
+    if (legZooms.length === 0) return 1.25;
+    if (idx === 0) return Math.max(1.25, legZooms[0]);
+    return legZooms[Math.min(legZooms.length - 1, idx - 1)];
+  };
 
-  const close = (index: number, km?: number) => ({
-    lon: stops[index].lon,
-    lat: stops[index].lat,
-    factor: km != null ? Math.max(stopFactors[index], zoomFor(km)) : stopFactors[index],
-  });
+  const departZoomOf = (idx: number) => {
+    if (legZooms.length === 0) return 1.25;
+    if (idx >= legZooms.length) return legZooms[legZooms.length - 1];
+    return legZooms[idx];
+  };
 
   if (seg.type === "intro") {
-    const km = legKms[0] || 900;
-    const dest = close(0, km);
+    const destZoom = arriveZoomOf(0);
     const e = quinticInOut(rawU);
     const startFactor = Math.min(0.45, fit.factor * 0.82);
     return {
       ...empty,
       camera: {
-        lon: lerpAngle(stops[0].lon - 22, dest.lon, e),
-        lat: stops[0].lat * 0.45 + dest.lat * 0.55 * e + stops[0].lat * 0.45 * (1 - e),
-        factor: startFactor + (dest.factor - startFactor) * e,
+        lon: lerpAngle(stops[0].lon - 22, stops[0].lon, e),
+        lat: stops[0].lat * 0.45 + stops[0].lat * 0.55 * e + stops[0].lat * 0.45 * (1 - e),
+        factor: lerpLog(startFactor, destZoom, e),
       },
       full,
       labelIndexes: project.style.labels === "always" ? stops.map((_, i) => i) : [0],
@@ -220,8 +235,8 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
   }
 
   if (seg.type === "outro") {
-    const lastLegKm = legKms[legKms.length - 1] || 800;
-    const from = close(seg.index, lastLegKm);
+    const fromZoom = departZoomOf(seg.index);
+    const from = { lon: stops[seg.index].lon, lat: stops[seg.index].lat, factor: fromZoom };
     const to = project.style.showFullRouteAtEnd || project.style.endZoom ? fit : from;
     const e = quinticInOut(Math.min(1, rawU * 1.25));
     const dists = stops.map((_, i) => (i === 0 ? null : legKms[i - 1] || null));
@@ -230,7 +245,7 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
       camera: {
         lon: lerpAngle(from.lon, to.lon, e),
         lat: from.lat + (to.lat - from.lat) * e,
-        factor: from.factor + (to.factor - from.factor) * e,
+        factor: lerpLog(from.factor, to.factor, e),
       },
       revealed: full,
       full,
@@ -245,11 +260,12 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
   }
 
   if (seg.type === "dwell") {
-    const prevKm = seg.index > 0 ? legKms[seg.index - 1] : legKms[0];
-    const nextKm = seg.index < legKms.length ? legKms[seg.index] : prevKm;
-    const baseCam = close(seg.index, Math.min(prevKm || 800, nextKm || 800));
-    // Subtle cinematic push-in during dwell
-    const dwellBoost = 1 + 0.05 * Math.sin(rawU * Math.PI);
+    const zArrive = arriveZoomOf(seg.index);
+    const zDepart = departZoomOf(seg.index);
+    // Hold arrival zoom briefly so arrival pin/label is clear, then smoothly zoom in/out in log-space to match next leg
+    const transitionT = smooth(Math.max(0, (rawU - 0.22) / 0.78));
+    const baseFactor = lerpLog(zArrive, zDepart, transitionT);
+    const dwellBoost = 1 + 0.04 * Math.sin(rawU * Math.PI);
     const dists = stops.map((_, i) => (i > 0 && i <= seg.index ? legKms[i - 1] || null : null));
     const isFinalStopDwell = seg.index === stops.length - 1 && stops.length > 1;
     const hasPhotos = stops[seg.index].photos.length > 0;
@@ -261,7 +277,7 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     const exitAlpha = showPhotos && rawU > 0.9 ? smooth(Math.max(0, (1 - rawU) / 0.1)) : 1;
     return {
       ...empty,
-      camera: { ...baseCam, factor: baseCam.factor * dwellBoost },
+      camera: { lon: stops[seg.index].lon, lat: stops[seg.index].lat, factor: baseFactor * dwellBoost },
       revealed: full.slice(0, seg.index),
       full,
       head: [stops[seg.index].lon, stops[seg.index].lat],
@@ -292,13 +308,10 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
   const dLat = aheadPt[1] - behindPt[1];
   const headBearing = Math.atan2(dLon * Math.cos((head[1] * Math.PI) / 180), dLat);
 
-  // Camera zoom arcs out slightly at mid-flight and zooms in as approaching destination
-  const startFactor = close(seg.index, km || 800).factor;
-  const endFactor = close(seg.index + 1, km || 800).factor;
-  const legScaleFactor = zoomFor(km || 800);
-  const baseFactor = Math.max(legScaleFactor, startFactor + (endFactor - startFactor) * u);
-  const midDip = Math.sin(u * Math.PI) * Math.min(0.24, (km || 600) / 14000);
-  const camFactor = Math.max(0.46, baseFactor - midDip);
+  // Maintain the leg's target zoom factor with a subtle 8% mid-leg camera pull-back so both stops remain framed
+  const legFactor = legZooms[seg.index] ?? zoomFor(km || 700);
+  const midPullback = 1 - 0.08 * Math.sin(u * Math.PI);
+  const camFactor = Math.max(0.46, legFactor * midPullback);
 
   const transport = project.legs[seg.index]?.transport ?? "plane";
   const meta = transportMeta(transport);
@@ -1697,9 +1710,7 @@ export function drawFrame(
   let rotation: [number, number, number] = [-frame.camera.lon, -frame.camera.lat, 0];
 
   if (cameraView !== "top") {
-    // Keep curved Earth horizon & blue atmosphere visible across the top/top-left while allowing deep zoom for small towns
-    const effFactor =
-      rawFactor <= 1.2 ? rawFactor : 1.2 + Math.pow(rawFactor - 1.2, 0.92) * 0.95;
+    const effFactor = rawFactor;
     globeRadius = effFactor * minDim;
 
     const outroEase =
@@ -1707,6 +1718,9 @@ export function drawFrame(
         ? 1 - frame.outroProgress * 0.42
         : 1;
     const zoomBlend = smooth((effFactor - 0.50) / 0.62) * outroEase;
+    // As camera dives from continental view into regional/city/town scale (effFactor > 1.8),
+    // smoothly pitch down toward overhead (0° tilt/roll) so nearby towns have zero vertical foreshortening.
+    const localFlatten = smooth((effFactor - 1.8) / 3.8);
 
     // Desired distance in pixels from target city up to the curved Earth horizon
     const limbRatio = cameraView === "horizon" ? 0.39 : 0.46;
@@ -1715,13 +1729,15 @@ export function drawFrame(
     const sinTiltZoomed = Math.max(0.36, Math.min(maxSinTilt, 1 - desiredLimbPx / globeRadius));
     const zoomedTiltDeg = (Math.asin(sinTiltZoomed) * 180) / Math.PI;
     const baseOrbitalTilt = cameraView === "horizon" ? 19 : 14;
-    const tiltDeg = baseOrbitalTilt * (1 - zoomBlend) + zoomedTiltDeg * zoomBlend;
+    const rawTiltDeg = baseOrbitalTilt * (1 - zoomBlend) + zoomedTiltDeg * zoomBlend;
+    const tiltDeg = rawTiltDeg * (1 - localFlatten);
 
     // Subtle dynamic camera roll/banking so the curved horizon sweeps across the top-left like orbital footage
     const legBank =
       frame.legProgress != null ? Math.sin(frame.legProgress * Math.PI) * 3.2 : 0;
     const targetRoll = cameraView === "horizon" ? -13.5 : -7.5;
-    const rollDeg = -3.5 * (1 - zoomBlend) + (targetRoll + legBank) * zoomBlend;
+    const rawRollDeg = -3.5 * (1 - zoomBlend) + (targetRoll + legBank) * zoomBlend;
+    const rollDeg = rawRollDeg * (1 - localFlatten);
 
     rotation = [-frame.camera.lon, -frame.camera.lat + tiltDeg, rollDeg];
 
@@ -1731,8 +1747,8 @@ export function drawFrame(
       .translate([0, 0])
       .scale(globeRadius);
     const off = tempProj([frame.camera.lon, frame.camera.lat]) ?? [0, 0];
-    const targetX = w * (0.5 + 0.025 * zoomBlend);
-    const targetY = h * (0.51 + 0.065 * zoomBlend);
+    const targetX = w * (0.5 + 0.025 * zoomBlend * (1 - localFlatten));
+    const targetY = h * (0.51 + 0.065 * zoomBlend * (1 - localFlatten));
     cx = targetX - off[0];
     cy = targetY - off[1];
   }
@@ -1745,21 +1761,31 @@ export function drawFrame(
   const path = geoPath(projection, ctx);
 
   // Render high-resolution WebGL 3D Satellite & Topographic Relief Globe (with 2D fallback while loading)
-  const renderedWithShader = drawShaderGlobe(ctx, {
-    w,
-    h,
-    cx,
-    cy,
-    scale: globeRadius,
-    rotation,
-    theme: project.style.theme,
-    projMode: "globe",
-    time,
-  });
+  // At extreme local zoom (rawFactor > 60), skip WebGL float inversion and render pure high-precision 2D vector coastlines
+  const renderedWithShader =
+    rawFactor <= 60 &&
+    drawShaderGlobe(ctx, {
+      w,
+      h,
+      cx,
+      cy,
+      scale: globeRadius,
+      rotation,
+      theme: project.style.theme,
+      projMode: "globe",
+      time,
+    });
 
-  if (!renderedWithShader) {
-    // Crisp atmospheric horizon halo around the 3D sphere
-    if (palette.stars) {
+  // When zoomed in close (rawFactor > 3.2), blend in crisp vector ocean & land polygons from countries-50m.json
+  // so narrow straits (like Øresund between Helsingør & Helsingborg) and coastal towns are razor-sharp
+  const vectorDetailAlpha = renderedWithShader ? smooth((rawFactor - 3.2) / 4.2) : 1;
+
+  if (vectorDetailAlpha > 0.01) {
+    ctx.save();
+    ctx.globalAlpha = vectorDetailAlpha;
+
+    // Crisp atmospheric horizon halo around the 3D sphere (when sphere rim is on screen)
+    if (!renderedWithShader && palette.stars && rawFactor < 4) {
       const corona = ctx.createRadialGradient(cx, cy, globeRadius * 0.94, cx, cy, globeRadius * 1.14);
       corona.addColorStop(0, "rgba(96, 165, 250, 0.26)");
       corona.addColorStop(0.45, "rgba(37, 99, 235, 0.09)");
@@ -1781,19 +1807,20 @@ export function drawFrame(
       ctx.beginPath();
       path({ type: "Sphere" } as never);
       ctx.clip();
+      const gradRadius = Math.min(globeRadius * 1.04, Math.max(w, h) * 1.5);
       const oceanLight = ctx.createRadialGradient(
-        cx - globeRadius * 0.28,
-        cy - globeRadius * 0.28,
-        globeRadius * 0.04,
-        cx,
-        cy,
-        globeRadius * 1.04
+        w * 0.35,
+        h * 0.35,
+        gradRadius * 0.04,
+        w * 0.5,
+        h * 0.5,
+        gradRadius
       );
       oceanLight.addColorStop(0, isSatelliteLook ? "rgba(30, 88, 158, 0.55)" : "rgba(56, 189, 248, 0.22)");
       oceanLight.addColorStop(0.55, isSatelliteLook ? "rgba(12, 42, 84, 0.25)" : "rgba(14, 165, 233, 0.05)");
       oceanLight.addColorStop(1, "rgba(2, 6, 18, 0.65)");
       ctx.fillStyle = oceanLight;
-      ctx.fillRect(cx - globeRadius - 4, cy - globeRadius - 4, globeRadius * 2 + 8, globeRadius * 2 + 8);
+      ctx.fillRect(0, 0, w, h);
       ctx.restore();
     }
 
@@ -1808,8 +1835,8 @@ export function drawFrame(
       countries.forEach((country) => {
         ctx.beginPath();
         path(country.feature as never);
-        ctx.strokeStyle = "rgba(56, 189, 248, 0.14)";
-        ctx.lineWidth = Math.max(4, globeRadius * 0.018);
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.16)";
+        ctx.lineWidth = Math.min(28, Math.max(4, globeRadius * 0.012));
         ctx.stroke();
       });
       ctx.restore();
@@ -1826,6 +1853,8 @@ export function drawFrame(
 
     ctx.clip();
     drawSatelliteBiomeShading(ctx, projection, globeRadius, project.style.theme);
+    ctx.restore();
+
     ctx.restore();
   }
 
@@ -1873,10 +1902,24 @@ export function drawFrame(
     ctx.restore();
   });
 
-  // Subtle graticule grid
+  // Adaptive multi-scale graticule grid so deep regional/town zoom shows a crisp coordinate grid
+  const graticuleStep: [number, number] =
+    rawFactor > 120
+      ? [0.05, 0.05]
+      : rawFactor > 35
+      ? [0.1, 0.1]
+      : rawFactor > 10
+      ? [0.5, 0.5]
+      : rawFactor > 3.5
+      ? [2, 2]
+      : [10, 10];
   ctx.beginPath();
-  path(geoGraticule()());
-  ctx.strokeStyle = palette.stars ? "rgba(255,255,255,0.028)" : "rgba(30,40,50,0.05)";
+  path(geoGraticule().step(graticuleStep)());
+  ctx.strokeStyle = palette.stars
+    ? rawFactor > 10
+      ? "rgba(255,255,255,0.055)"
+      : "rgba(255,255,255,0.028)"
+    : "rgba(30,40,50,0.05)";
   ctx.lineWidth = 0.5;
   ctx.stroke();
 
@@ -2018,12 +2061,24 @@ export function drawFrame(
 
   // 9. Floating Glassmorphic City & Country Callout Cards + "+XXXX km" Distance Counter
   const taken: { x: number; y: number; w: number; h: number }[] = [];
+  const labeledPinScreenPts: [number, number][] = [];
   // Process active stop first so its label always wins priority and nearby labels smartly shift or hide
-  const orderedLabels = [...frame.labelIndexes].sort((a, b) => {
+  const sortedLabels = [...frame.labelIndexes].sort((a, b) => {
     if (a === frame.activeStopIndex) return -1;
     if (b === frame.activeStopIndex) return 1;
     return b - a;
   });
+
+  // Deduplicate revisited places (e.g. round-trip return to Bengaluru, Helsingør, Berlin, Frankfurt)
+  // so the highest-priority / active visit represents that city without duplicate stacked cards
+  const orderedLabels: number[] = [];
+  for (const idx of sortedLabels) {
+    const candidateStop = project.stops[idx];
+    if (!candidateStop) continue;
+    if (!orderedLabels.some((existingIdx) => isSamePlace(project.stops[existingIdx], candidateStop))) {
+      orderedLabels.push(idx);
+    }
+  }
 
   orderedLabels.forEach((index) => {
     const stop = project.stops[index];
@@ -2031,6 +2086,14 @@ export function drawFrame(
     if (!xy) return;
 
     const isActive = index === frame.activeStopIndex;
+    // When zoomed out, if another already-labeled stop pin is within 34px on screen, skip clustering a second card around the same pin
+    if (
+      !isActive &&
+      project.style.optimizeLabels &&
+      labeledPinScreenPts.some((pt) => Math.hypot(pt[0] - xy[0], pt[1] - xy[1]) < 34)
+    ) {
+      return;
+    }
     const stopImgs = images[stop.id] ?? [];
     const visibleThumbs = stopImgs.slice(0, 4);
     const activePhotoIdx =
@@ -2088,6 +2151,7 @@ export function drawFrame(
     const cardX = chosen.x;
     const cardY = chosen.y;
     taken.push({ x: cardX - 6, y: cardY - 6, w: cardW + 12, h: cardH + 26 });
+    labeledPinScreenPts.push([xy[0], xy[1]]);
 
     // Translucent dark charcoal glassmorphic pill card (mult.dev style)
     ctx.save();

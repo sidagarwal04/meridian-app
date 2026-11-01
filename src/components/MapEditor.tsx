@@ -302,20 +302,21 @@ export function MapEditor({
         }
       }
 
-      const safeZoom = Number.isFinite(zoom) ? Math.max(0.75, Math.min(6, zoom)) : 1;
+      const safeZoom = Number.isFinite(zoom) ? Math.max(0.75, Math.min(45, zoom)) : 1;
       let projection: GeoProjection;
       let shaderRendered = false;
 
       if (projView === "globe") {
         const minDim = Math.min(width, height);
-        const effFactor = 0.56 * (safeZoom <= 1.2 ? safeZoom : 1.2 + Math.pow(safeZoom - 1.2, 0.78) * 0.9);
+        const effFactor = 0.56 * safeZoom;
         const globeRadius = effFactor * minDim;
         const zoomBlend = Math.max(0, Math.min(1, (effFactor - 0.52) / 0.65));
+        const localFlatten = Math.max(0, Math.min(1, (effFactor - 1.8) / 3.8));
 
         const desiredLimbPx = Math.min(height * 0.38, minDim * 0.40);
         const sinTilt = Math.max(0.34, Math.min(0.86, 1 - desiredLimbPx / globeRadius));
-        const tiltDeg = 18 * (1 - zoomBlend) + ((Math.asin(sinTilt) * 180) / Math.PI) * zoomBlend;
-        const rollDeg = -4 * (1 - zoomBlend) + -12.5 * zoomBlend;
+        const tiltDeg = (18 * (1 - zoomBlend) + ((Math.asin(sinTilt) * 180) / Math.PI) * zoomBlend) * (1 - localFlatten);
+        const rollDeg = (-4 * (1 - zoomBlend) + -12.5 * zoomBlend) * (1 - localFlatten);
 
         const rotation: [number, number, number] = [-globeCenter.lon, -globeCenter.lat + tiltDeg, rollDeg];
         const tempProj = geoOrthographic()
@@ -324,8 +325,8 @@ export function MapEditor({
           .translate([0, 0])
           .scale(globeRadius);
         const off = tempProj([globeCenter.lon, globeCenter.lat]) ?? [0, 0];
-        const cx = width * (0.5 + 0.02 * zoomBlend) - off[0];
-        const cy = height * (0.51 + 0.05 * zoomBlend) - off[1];
+        const cx = width * (0.5 + 0.02 * zoomBlend * (1 - localFlatten)) - off[0];
+        const cy = height * (0.51 + 0.05 * zoomBlend * (1 - localFlatten)) - off[1];
 
         sphereBoundsRef.current = { cx, cy, r: globeRadius };
         projection = geoOrthographic()
@@ -646,7 +647,7 @@ export function MapEditor({
     const width = wrap?.clientWidth || 640;
     const height = wrap?.clientHeight || 480;
     setZoom((prev) => {
-      const next = Math.max(0.75, Math.min(5.5, Number((prev * factor).toFixed(2))));
+      const next = Math.max(0.75, Math.min(45, Number((prev * factor).toFixed(2))));
       setPan((p) => clampPan(p.x, p.y, next, width, height));
       return next;
     });
