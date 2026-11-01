@@ -73,6 +73,7 @@ export type AudioSession = {
   triggerIntro: (durationSec?: number) => void;
   triggerLeg: (transport: Transport, durationSec?: number) => void;
   triggerArrival: (hasPhotos?: boolean) => void;
+  syncProgress: (time: number, total: number) => void;
   stopLeg: () => void;
   stop: () => void;
 };
@@ -1380,11 +1381,27 @@ function startGrooveEngine(
   dest: AudioNode,
   id: MusicId,
   preRenderedLoop: AudioBuffer | null
-): { stop: () => void } {
+): { setGainMultiplier: (mult: number) => void; stop: () => void } {
+  const BASE_MUSIC_GAIN = 0.82;
   const musicBus = audio.createGain();
   musicBus.gain.setValueAtTime(0.001, audio.currentTime);
-  musicBus.gain.linearRampToValueAtTime(0.82, audio.currentTime + 0.12);
+  musicBus.gain.linearRampToValueAtTime(BASE_MUSIC_GAIN, audio.currentTime + 0.12);
   musicBus.connect(dest);
+  let fadingStarted = false;
+
+  const setGainMultiplier = (mult: number) => {
+    const clamped = Math.max(0, Math.min(1, mult));
+    if (clamped >= 0.995 && !fadingStarted) return;
+    fadingStarted = true;
+    const now = audio.currentTime;
+    try {
+      const target = Math.max(0.0001, BASE_MUSIC_GAIN * clamped);
+      musicBus.gain.cancelScheduledValues(now);
+      musicBus.gain.setTargetAtTime(target, now, 0.045);
+    } catch {
+      /* ignore */
+    }
+  };
 
   if (preRenderedLoop) {
     const loopSource = audio.createBufferSource();
@@ -1394,6 +1411,7 @@ function startGrooveEngine(
     loopSource.start(audio.currentTime);
 
     return {
+      setGainMultiplier,
       stop: () => {
         const t = audio.currentTime;
         try {
@@ -1440,6 +1458,7 @@ function startGrooveEngine(
   const timer = window.setInterval(pumpLookahead, 140);
 
   return {
+    setGainMultiplier,
     stop: () => {
       window.clearInterval(timer);
       const t = audio.currentTime;
@@ -1532,6 +1551,20 @@ export async function createAudioSession(options: {
         audio.resume().catch(() => {});
       }
       playArrivalChimeOnNode(audio, master, hasPhotos);
+    },
+    syncProgress: (time: number, total: number) => {
+      if (stopped || !groove || total <= 0) return;
+      // Smoothly fade out background music over the final ~2.8 seconds (outro + end of final stop)
+      const fadeDuration = Math.min(3.2, Math.max(1.6, total * 0.22));
+      const remaining = Math.max(0, total - time);
+      if (remaining < fadeDuration) {
+        const u = remaining / fadeDuration;
+        // Smooth S-curve with gentle tail roll-off so music fades out naturally to silence
+        const smoothCurve = u * u * (3 - 2 * u);
+        groove.setGainMultiplier(smoothCurve);
+      } else {
+        groove.setGainMultiplier(1);
+      }
     },
     stopLeg: () => {
       currentLegHandle?.stop();

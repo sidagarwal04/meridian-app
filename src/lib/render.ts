@@ -192,7 +192,7 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     photoU: 0,
     photoReveal: 0,
     distanceKm: null,
-    showUnderlay: 0.14,
+    showUnderlay: 0,
   };
   if (!stops.length || !seg) return empty;
 
@@ -231,7 +231,7 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
       photoStop: null,
       photoU: 0,
       photoReveal: 0,
-      showUnderlay: 0.1 * e,
+      showUnderlay: 0,
       head: [stops[0].lon, stops[0].lat],
     };
   }
@@ -257,7 +257,7 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
       totalDistanceKm: project.style.units === "none" || totalRouteKm < 1 ? null : totalRouteKm,
       outroProgress: smooth(Math.max(0, (rawU - 0.18) / 0.55)),
       head: [stops[seg.index].lon, stops[seg.index].lat],
-      showUnderlay: 0.16,
+      showUnderlay: 0,
     };
   }
 
@@ -292,7 +292,7 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
       photoStop: showPhotos ? seg.index : null,
       photoU: adjPhotoU,
       photoReveal: enterAlpha * exitAlpha,
-      showUnderlay: 0.15,
+      showUnderlay: 0,
     };
   }
 
@@ -345,7 +345,7 @@ export function frameAt(project: Project, paths: [number, number][][], time: num
     photoU: 0,
     photoReveal: 0,
     distanceKm: project.style.units === "none" ? null : curDist,
-    showUnderlay: 0.14,
+    showUnderlay: 0,
   };
 }
 
@@ -2020,16 +2020,19 @@ export function drawFrame(
     ctx.restore();
   };
 
-  strokeRoute(frame.full, frame.showUnderlay, Math.max(1.5, w / 520), false, false);
+  if (frame.showUnderlay > 0.005) {
+    strokeRoute(frame.full, frame.showUnderlay, Math.max(1.5, w / 520), false, false);
+  }
   strokeRoute(frame.revealed, 1, Math.max(3.6, w / 210), frame.dashed, true);
 
   // 7. Stop Waypoint Nodes + Concentric Target Rings on Active Stop
+  // Upcoming stops remain hidden until the leg departing from the previous stop begins.
   const reachedMaxIndex = frame.legIndex != null ? frame.legIndex + 1 : frame.activeStopIndex;
   project.stops.forEach((stop, idx) => {
+    const isReached = idx <= reachedMaxIndex || project.style.labels === "always";
+    if (!isReached) return;
     const xy = projection([stop.lon, stop.lat]);
     if (!xy) return;
-    const isReached = idx <= reachedMaxIndex || project.style.labels === "always";
-    if (!isReached && frame.showUnderlay <= 0.05) return;
 
     const isActive = idx === frame.activeStopIndex;
     const r = Math.max(4.5, w / 195);

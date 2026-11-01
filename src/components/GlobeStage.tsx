@@ -214,6 +214,7 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     if (!session || !curShown.stops.length) return;
     const { segs, total } = buildSegs(curShown, curPaths);
     const t = Math.max(0, Math.min(time, Math.max(total - 0.001, 0)));
+    session.syncProgress(t, total);
     const seg = segs.find((item) => t < item.start + item.dur) ?? segs[segs.length - 1];
     if (!seg) return;
     const key = `${seg.type}:${seg.index}`;
