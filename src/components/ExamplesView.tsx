@@ -6,7 +6,7 @@ import { GlobeStage } from "./GlobeStage";
 import { PageShell } from "./PageShell";
 import { TEMPLATES } from "@/lib/templates";
 import { THEMES, applyTheme, transportMeta, type ThemeId } from "@/lib/types";
-import { countVisitedPlaces, flagEmoji, haversineKm } from "@/lib/geo";
+import { countUniqueCities, countUniqueCountries, flagEmoji, haversineKm, internationalCountryName } from "@/lib/geo";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "./AuthProvider";
 
@@ -93,16 +93,16 @@ export function ExamplesView() {
 
               <div className="theater-stats">
                 <div>
-                  <strong>{countVisitedPlaces(activeProject.stops)}</strong>
-                  <span>Places</span>
+                  <strong>{countUniqueCountries(activeProject.stops)}</strong>
+                  <span>{countUniqueCountries(activeProject.stops) === 1 ? "Country" : "Countries"}</span>
                 </div>
                 <div>
-                  <strong>{activeDistanceKm.toLocaleString()} km</strong>
-                  <span>Total distance</span>
+                  <strong>{countUniqueCities(activeProject.stops)}</strong>
+                  <span>{countUniqueCities(activeProject.stops) === 1 ? "City" : "Cities"}</span>
                 </div>
                 <div>
-                  <strong>{THEMES[activeProject.style.theme].label}</strong>
-                  <span>Map theme</span>
+                  <strong>{activeDistanceKm.toLocaleString()} kms</strong>
+                  <span>Travelled</span>
                 </div>
               </div>
 
@@ -113,7 +113,9 @@ export function ExamplesView() {
                     <span>
                       {stop.code ? `${flagEmoji(stop.code)} ` : ""}
                       <strong>{stop.name}</strong>
-                      {stop.country ? <small> · {stop.country}</small> : null}
+                      {stop.country || stop.code ? (
+                        <small> · {internationalCountryName(stop.code, stop.country)}</small>
+                      ) : null}
                     </span>
                     {activeProject.legs[idx] ? (
                       <span className="theater-leg-pill">
@@ -159,8 +161,10 @@ export function ExamplesView() {
                 <div className="example-copy">
                   <div className="card-meta-row">
                     <span>
-                      {countVisitedPlaces(template.project.stops)}{" "}
-                      {countVisitedPlaces(template.project.stops) === 1 ? "place" : "places"}
+                      {countUniqueCountries(template.project.stops)}{" "}
+                      {countUniqueCountries(template.project.stops) === 1 ? "Country" : "Countries"} ·{" "}
+                      {countUniqueCities(template.project.stops)}{" "}
+                      {countUniqueCities(template.project.stops) === 1 ? "City" : "Cities"}
                     </span>
                     <span>·</span>
                     <span>

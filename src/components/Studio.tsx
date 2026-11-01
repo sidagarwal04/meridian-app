@@ -4,10 +4,19 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { searchCities } from "@/lib/cities";
-import { countVisitedPlaces, flagEmoji, haversineKm, nearestCity } from "@/lib/geo";
+import {
+  countUniqueCities,
+  countUniqueCountries,
+  countVisitedPlaces,
+  flagEmoji,
+  formatRouteStatsSummary,
+  haversineKm,
+  internationalCountryName,
+  nearestCity,
+} from "@/lib/geo";
 import { parseGeoJson, parseGpx, parseItinerary, parseKml, placesFromGoogleUrl, simplifyTrack } from "@/lib/parse";
 import { encodeRoute } from "@/lib/share";
-import { TRACKS, playMusicPreview, playTransportPreview, unlockAudio } from "@/lib/music";
+import { TRACKS, playTransportPreview, stopAllAudio, unlockAudio } from "@/lib/music";
 import { getCachedProjectSync, getInMemoryProjectSync, getProject, saveProject } from "@/lib/storage";
 import { TEMPLATES } from "@/lib/templates";
 import {
@@ -58,6 +67,7 @@ function sanitizeProject(project: Project): Project {
       Math.abs(s.lon) <= 180
   ).map((s) => ({
     ...s,
+    country: internationalCountryName(s.code, s.country),
     photos: Array.isArray(s.photos) ? s.photos.filter(Boolean) : [],
   }));
   const stops = validStops.length > 0 ? validStops : starterStops();
@@ -128,9 +138,27 @@ export function Studio() {
       if (musicTimer.current) clearTimeout(musicTimer.current);
       if (copyTimer.current) clearTimeout(copyTimer.current);
       musicStopRef.current?.();
+      stopAllAudio();
     },
     []
   );
+
+  useEffect(() => {
+    if (stageMode === "map" && !preview) {
+      if (sfxTimer.current) clearTimeout(sfxTimer.current);
+      if (musicTimer.current) clearTimeout(musicTimer.current);
+      musicStopRef.current?.();
+      musicStopRef.current = null;
+      setPreviewingSfx(null);
+      setPreviewingMusic(null);
+      inlineGlobe.current?.pause();
+      stopAllAudio();
+    }
+  }, [stageMode, preview]);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   useEffect(() => {
     const cached = getCachedProjectSync(params.id);
@@ -238,8 +266,18 @@ export function Studio() {
   }, [project]);
 
   const visitedPlacesCount = useMemo(
-    () => (project ? countVisitedPlaces(project.stops) : 0),
+    () => (project ? countUniqueCities(project.stops) : 0),
     [project]
+  );
+
+  const visitedCountriesCount = useMemo(
+    () => (project ? countUniqueCountries(project.stops) : 0),
+    [project]
+  );
+
+  const routeStatsSummary = useMemo(
+    () => (project ? formatRouteStatsSummary(project.stops, totalDistanceKm, project.style.units) : ""),
+    [project, totalDistanceKm]
   );
 
   const pinnedStopsCount = useMemo(
@@ -272,7 +310,15 @@ export function Studio() {
       return;
     }
     update((current) => {
-      const stops = [...current.stops, makeStop({ ...place, lat: safeLat, lon: safeLon })];
+      const stops = [
+        ...current.stops,
+        makeStop({
+          ...place,
+          country: internationalCountryName(place.code, place.country),
+          lat: safeLat,
+          lon: safeLon,
+        }),
+      ];
       return {
         ...current,
         stops,
@@ -445,29 +491,32 @@ export function Studio() {
     }, durationSec * 1000);
   };
 
-  const auditionMusic = (musicId: Project["style"]["music"], durationSec = 4.5) => {
-    setPreviewingSfx(null);
+  const switchToRouteStudio = () => {
     if (sfxTimer.current) clearTimeout(sfxTimer.current);
     if (musicTimer.current) clearTimeout(musicTimer.current);
-    if (previewingMusic === musicId) {
-      musicStopRef.current?.();
-      musicStopRef.current = null;
-      setPreviewingMusic(null);
-      return;
+    musicStopRef.current?.();
+    musicStopRef.current = null;
+    setPreviewingSfx(null);
+    setPreviewingMusic(null);
+    inlineGlobe.current?.pause();
+    stopAllAudio();
+    setStageMode("map");
+  };
+
+  const switchToPreview = () => {
+    unlockAudio();
+    if (sfxTimer.current) clearTimeout(sfxTimer.current);
+    if (musicTimer.current) clearTimeout(musicTimer.current);
+    musicStopRef.current?.();
+    musicStopRef.current = null;
+    setPreviewingSfx(null);
+    setPreviewingMusic(null);
+    setStageAudio(true);
+    if (stageMode === "globe") {
+      inlineGlobe.current?.play();
+    } else {
+      setStageMode("globe");
     }
-    if (musicId === "none") {
-      musicStopRef.current?.();
-      musicStopRef.current = null;
-      setPreviewingMusic(null);
-      return;
-    }
-    setPreviewingMusic(musicId);
-    playMusicPreview(musicId, durationSec).then((stopFn) => {
-      musicStopRef.current = stopFn;
-    });
-    musicTimer.current = setTimeout(() => {
-      setPreviewingMusic((curr) => (curr === musicId ? null : curr));
-    }, durationSec * 1000);
   };
 
   const setTransport = (index: number, transport: Transport) => {
@@ -696,21 +745,14 @@ export function Studio() {
           <button
             type="button"
             className={stageMode === "map" ? "active" : ""}
-            onClick={() => setStageMode("map")}
+            onClick={switchToRouteStudio}
           >
             🗺 Route Studio
           </button>
           <button
             type="button"
             className={stageMode === "globe" ? "active" : ""}
-            onClick={() => {
-              unlockAudio();
-              if (musicTimer.current) clearTimeout(musicTimer.current);
-              musicStopRef.current?.();
-              musicStopRef.current = null;
-              setPreviewingMusic(null);
-              setStageMode("globe");
-            }}
+            onClick={switchToPreview}
           >
             ▶ Preview
           </button>
@@ -718,7 +760,7 @@ export function Studio() {
 
         <div className="studio-top-right">
           <span className="credits-badge">
-            {visitedPlacesCount} {visitedPlacesCount === 1 ? "place" : "places"} · {totalDistanceKm.toLocaleString()} km
+            {routeStatsSummary}
           </span>
           <button
             className={`btn ghost sm${copied ? " copied" : ""}`}
@@ -1059,10 +1101,11 @@ export function Studio() {
                 <select defaultValue="" onChange={(event) => event.target.value && applyTemplate(event.target.value)}>
                   <option value="">Choose a curated route…</option>
                   {TEMPLATES.map((template) => {
-                    const count = countVisitedPlaces(template.project.stops);
+                    const countries = countUniqueCountries(template.project.stops);
+                    const cities = countUniqueCities(template.project.stops);
                     return (
                       <option key={template.id} value={template.id}>
-                        {template.title} ({count} {count === 1 ? "place" : "places"})
+                        {template.title} ({countries} {countries === 1 ? "Country" : "Countries"} · {cities} {cities === 1 ? "City" : "Cities"})
                       </option>
                     );
                   })}
@@ -1630,18 +1673,17 @@ export function Studio() {
               <div className="option-group">
                 <div className="sfx-header-row">
                   <span className="field-label">Background Soundtrack</span>
-                  <span className="sfx-sub-hint">Upbeat beats &amp; melodies</span>
+                  <span className="sfx-sub-hint">Plays in Preview &amp; Export</span>
                 </div>
                 <p className="hint" style={{ marginBottom: 8 }}>
-                  Fun, beat-driven travel grooves with drums, basslines, and synth/marimba hooks mixed right into your preview and exported video.
+                  Fun, beat-driven travel grooves with drums, basslines, and synth/marimba hooks. Plays only during Preview and video export so Route Studio stays quiet.
                 </p>
                 {!limits.music ? <p className="notice">Music is a Pro feature. Free exports stay silent.</p> : null}
                 <div className="music-list">
                   {TRACKS.map((track) => {
                     const isSelected = project.style.music === track.id;
-                    const isTesting = previewingMusic === track.id;
                     return (
-                      <div key={track.id} className={`music-card ${isSelected ? "on" : ""} ${isTesting ? "playing" : ""}`}>
+                      <div key={track.id} className={`music-card ${isSelected ? "on" : ""}`}>
                         <label className="music-card-main">
                           <input
                             type="radio"
@@ -1653,7 +1695,6 @@ export function Studio() {
                                 ...current,
                                 style: { ...current.style, music: track.id, musicChosen: true },
                               }));
-                              auditionMusic(track.id, 4.5);
                             }}
                           />
                           <span className="sfx-icon" aria-hidden="true">
@@ -1667,15 +1708,6 @@ export function Studio() {
                             <small>{track.blurb}</small>
                           </div>
                         </label>
-                        {track.id !== "none" ? (
-                          <button
-                            type="button"
-                            className={`sfx-play-badge music-test-btn ${isTesting ? "active" : ""}`}
-                            onClick={() => auditionMusic(track.id, 5.0)}
-                          >
-                            {isTesting ? "⏹ Stop" : "▶ Sample"}
-                          </button>
-                        ) : null}
                       </div>
                     );
                   })}
@@ -1720,7 +1752,7 @@ export function Studio() {
                 ref={inlineGlobe}
                 project={project}
                 pro={limits.pro}
-                play={preview ? "idle" : "loop"}
+                play={preview ? "idle" : "auto"}
                 enableAudio={stageAudio && !preview}
               />
               <div className="globe-stage-controls">
@@ -1743,7 +1775,7 @@ export function Studio() {
                   ))}
                 </div>
                 <button type="button" className="map-ctrl-btn text" onClick={() => inlineGlobe.current?.play()}>
-                  ↻ Replay animation
+                  ↻ Preview again
                 </button>
                 <button
                   type="button"
@@ -1753,7 +1785,7 @@ export function Studio() {
                 >
                   {stageAudio ? "🔊 Sound On" : "🔇 Muted"}
                 </button>
-                <button type="button" className="map-ctrl-btn text" onClick={() => setStageMode("map")}>
+                <button type="button" className="map-ctrl-btn text" onClick={switchToRouteStudio}>
                   ✎ Back to Route Studio
                 </button>
               </div>
@@ -1780,7 +1812,7 @@ export function Studio() {
               <div>
                 <strong>Export Video · {project.title}</strong>
                 <span className="modal-sub">
-                  {visitedPlacesCount} {visitedPlacesCount === 1 ? "place" : "places"} · {project.style.aspect} · {(project.style.format ?? "mp4").toUpperCase()} · {project.style.resolution}p @ {project.style.fps}fps
+                  {routeStatsSummary} · {project.style.aspect} · {(project.style.format ?? "mp4").toUpperCase()} · {project.style.resolution}p @ {project.style.fps}fps
                 </span>
               </div>
               <button

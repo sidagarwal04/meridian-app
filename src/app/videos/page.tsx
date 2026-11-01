@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { GlobeStage } from "@/components/GlobeStage";
 import { PageShell } from "@/components/PageShell";
-import { countVisitedPlaces, flagEmoji, haversineKm } from "@/lib/geo";
+import { countUniqueCities, countUniqueCountries, flagEmoji, formatRouteStatsSummary, haversineKm } from "@/lib/geo";
 import {
   createAndSave,
   deleteProject,
@@ -115,10 +115,8 @@ export default function Page() {
                 <div className="video-copy">
                   <div className="card-meta-row">
                     <span>
-                      {countVisitedPlaces(project.stops)} {countVisitedPlaces(project.stops) === 1 ? "place" : "places"}
+                      {formatRouteStatsSummary(project.stops, distanceOf(project), project.style.units)}
                     </span>
-                    <span>·</span>
-                    <span>{distanceOf(project).toLocaleString()} km</span>
                     <span>·</span>
                     <span>{project.style.aspect}</span>
                   </div>
@@ -200,8 +198,10 @@ export default function Page() {
                 <div>
                   <strong>{tpl.title}</strong>
                   <span>
-                    {countVisitedPlaces(tpl.project.stops)}{" "}
-                    {countVisitedPlaces(tpl.project.stops) === 1 ? "place" : "places"} ·{" "}
+                    {countUniqueCountries(tpl.project.stops)}{" "}
+                    {countUniqueCountries(tpl.project.stops) === 1 ? "Country" : "Countries"} ·{" "}
+                    {countUniqueCities(tpl.project.stops)}{" "}
+                    {countUniqueCities(tpl.project.stops) === 1 ? "City" : "Cities"} ·{" "}
                     {tpl.project.stops
                       .slice(0, 3)
                       .map((s) => s.name)

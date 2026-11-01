@@ -87,7 +87,25 @@ let walkLoopBufferCache: AudioBuffer | null = null;
 const grooveBufferCache = new Map<string, AudioBuffer>();
 const grooveRenderPromises = new Map<string, Promise<AudioBuffer | null>>();
 let activePreviewStop: (() => void) | null = null;
+const activeSessions = new Set<AudioSession>();
+let audioGeneration = 0;
 let unlockBound = false;
+
+/**
+ * Immediately stops all active background music sessions and preview sounds.
+ * Also invalidates any in-flight async audio session creations so they cannot start after being cancelled.
+ */
+export function stopAllAudio() {
+  audioGeneration++;
+  if (activePreviewStop) {
+    activePreviewStop();
+    activePreviewStop = null;
+  }
+  for (const session of Array.from(activeSessions)) {
+    session.stop();
+  }
+  activeSessions.clear();
+}
 
 function ctx() {
   if (!shared) {
@@ -834,12 +852,14 @@ export function playArrivalChimeOnNode(audio: AudioContext, target: AudioNode, h
  */
 export async function playTransportPreview(transport: Transport, durationSec = 1.65): Promise<() => void> {
   try {
+    const gen = ++audioGeneration;
     if (activePreviewStop) {
       activePreviewStop();
       activePreviewStop = null;
     }
     const audio = ctx();
     if (audio.state === "suspended") await audio.resume();
+    if (gen !== audioGeneration) return () => {};
     const handle = playTransportSoundOnNode(audio, audio.destination, transport, durationSec);
     activePreviewStop = handle.stop;
     return handle.stop;
@@ -857,7 +877,10 @@ export async function playMusicPreview(id: MusicId, durationSec = 4.2): Promise<
       activePreviewStop();
       activePreviewStop = null;
     }
-    if (id === "none") return () => {};
+    if (id === "none") {
+      stopAllAudio();
+      return () => {};
+    }
     const session = await createAudioSession({ music: id, soundEffects: false });
     if (!session) return () => {};
     const timer = window.setTimeout(() => {
@@ -1376,11 +1399,23 @@ function startGrooveEngine(
         try {
           musicBus.gain.cancelScheduledValues(t);
           musicBus.gain.setValueAtTime(Math.max(0.0001, musicBus.gain.value), t);
-          musicBus.gain.linearRampToValueAtTime(0.0001, t + 0.12);
-          loopSource.stop(t + 0.14);
+          musicBus.gain.linearRampToValueAtTime(0.0001, t + 0.04);
+          loopSource.stop(t + 0.05);
         } catch {
-          /* ignore */
+          try {
+            loopSource.stop();
+          } catch {
+            /* ignore */
+          }
         }
+        window.setTimeout(() => {
+          try {
+            loopSource.disconnect();
+            musicBus.disconnect();
+          } catch {
+            /* ignore */
+          }
+        }, 60);
       },
     };
   }
@@ -1411,10 +1446,17 @@ function startGrooveEngine(
       try {
         musicBus.gain.cancelScheduledValues(t);
         musicBus.gain.setValueAtTime(Math.max(0.0001, musicBus.gain.value), t);
-        musicBus.gain.linearRampToValueAtTime(0.0001, t + 0.12);
+        musicBus.gain.linearRampToValueAtTime(0.0001, t + 0.04);
       } catch {
         /* ignore */
       }
+      window.setTimeout(() => {
+        try {
+          musicBus.disconnect();
+        } catch {
+          /* ignore */
+        }
+      }, 60);
     },
   };
 }
@@ -1428,10 +1470,16 @@ export async function createAudioSession(options: {
   music: MusicId;
   soundEffects: boolean;
 }): Promise<AudioSession | null> {
+  const gen = ++audioGeneration;
   if (activePreviewStop) {
     activePreviewStop();
     activePreviewStop = null;
   }
+  for (const existing of Array.from(activeSessions)) {
+    existing.stop();
+  }
+  activeSessions.clear();
+
   if (options.music === "none" && !options.soundEffects) return null;
   const audio = ctx();
   if (audio.state === "suspended") {
@@ -1441,8 +1489,11 @@ export async function createAudioSession(options: {
       /* autoplay policy may defer until user gesture */
     }
   }
+  if (gen !== audioGeneration) return null;
+
   const preRenderedLoop =
     options.music !== "none" ? await getOrRenderGrooveBuffer(audio, options.music) : null;
+  if (gen !== audioGeneration) return null;
 
   const master = audio.createGain();
   master.gain.value = 0.9;
@@ -1451,13 +1502,14 @@ export async function createAudioSession(options: {
   master.connect(dest);
 
   let currentLegHandle: { stop: () => void } | null = null;
+  let stopped = false;
   const groove =
     options.music !== "none" ? startGrooveEngine(audio, master, options.music, preRenderedLoop) : null;
 
-  return {
+  const session: AudioSession = {
     dest,
     triggerIntro: (durationSec = 1.1) => {
-      if (!options.soundEffects) return;
+      if (stopped || !options.soundEffects) return;
       currentLegHandle?.stop();
       if (audio.state === "suspended") {
         audio.resume().catch(() => {});
@@ -1465,7 +1517,7 @@ export async function createAudioSession(options: {
       currentLegHandle = playTransportSoundOnNode(audio, master, "line", Math.max(0.65, durationSec));
     },
     triggerLeg: (transport: Transport, durationSec = 2.2) => {
-      if (!options.soundEffects) return;
+      if (stopped || !options.soundEffects) return;
       currentLegHandle?.stop();
       if (audio.state === "suspended") {
         audio.resume().catch(() => {});
@@ -1473,7 +1525,7 @@ export async function createAudioSession(options: {
       currentLegHandle = playTransportSoundOnNode(audio, master, transport, durationSec);
     },
     triggerArrival: (hasPhotos = false) => {
-      if (!options.soundEffects) return;
+      if (stopped || !options.soundEffects) return;
       currentLegHandle?.stop();
       currentLegHandle = null;
       if (audio.state === "suspended") {
@@ -1486,9 +1538,30 @@ export async function createAudioSession(options: {
       currentLegHandle = null;
     },
     stop: () => {
+      if (stopped) return;
+      stopped = true;
+      activeSessions.delete(session);
       currentLegHandle?.stop();
       currentLegHandle = null;
       groove?.stop();
+      const t = audio.currentTime;
+      try {
+        master.gain.cancelScheduledValues(t);
+        master.gain.setValueAtTime(Math.max(0.0001, master.gain.value), t);
+        master.gain.linearRampToValueAtTime(0.0001, t + 0.04);
+      } catch {
+        /* ignore */
+      }
+      window.setTimeout(() => {
+        try {
+          master.disconnect();
+        } catch {
+          /* ignore */
+        }
+      }, 60);
     },
   };
+
+  activeSessions.add(session);
+  return session;
 }

@@ -1,5 +1,5 @@
 import { geoGraticule, geoOrthographic, geoPath, type GeoProjection } from "d3-geo";
-import { countVisitedPlaces, flagEmoji, pathKm, pointAlong, slicePath } from "./geo";
+import { countUniqueCities, countUniqueCountries, flagEmoji, internationalCountryName, pathKm, pointAlong, slicePath } from "./geo";
 import { drawShaderGlobe } from "./globeShader";
 import { THEMES, transportMeta, type Project, type Style, type ThemeId, type Transport } from "./types";
 import type { CountryShape } from "./world";
@@ -40,15 +40,18 @@ function quinticInOut(t: number) {
 }
 
 // Continuous distance-aware camera zoom factor so nearby places zoom in deep enough that labels never overlap
+// and short regional hops (e.g. Copenhagen -> Kokkedal -> Helsingor) are clearly visible on the map
 function zoomFor(km: number) {
-  const d = Math.max(25, km || 700);
+  const d = Math.max(4, km || 700);
   if (d >= 8500) return 0.5;
   if (d >= 4500) return 0.5 + ((8500 - d) / 4000) * 0.24; // 0.50 -> 0.74
   if (d >= 2000) return 0.74 + ((4500 - d) / 2500) * 0.34; // 0.74 -> 1.08
-  if (d >= 900) return 1.08 + ((2000 - d) / 1100) * 0.52; // 1.08 -> 1.60
-  if (d >= 400) return 1.6 + ((900 - d) / 500) * 0.85; // 1.60 -> 2.45
-  if (d >= 150) return 2.45 + ((400 - d) / 250) * 1.05; // 2.45 -> 3.50
-  return Math.min(4.6, 3.5 + ((150 - d) / 125) * 1.1); // 3.50 -> 4.60 for very close cities
+  if (d >= 900) return 1.08 + ((2000 - d) / 1100) * 0.57; // 1.08 -> 1.65
+  if (d >= 400) return 1.65 + ((900 - d) / 500) * 1.15; // 1.65 -> 2.80
+  if (d >= 150) return 2.8 + ((400 - d) / 250) * 2.2; // 2.80 -> 5.00
+  if (d >= 60) return 5.0 + ((150 - d) / 90) * 4.5; // 5.00 -> 9.50
+  if (d >= 20) return 9.5 + ((60 - d) / 40) * 7.5; // 9.50 -> 17.00
+  return Math.min(26, 17.0 + ((20 - d) / 16) * 9.0); // 17.00 -> 26.00 for very close towns/suburbs
 }
 
 function fitFactor(stops: Project["stops"]) {
@@ -60,7 +63,7 @@ function fitFactor(stops: Project["stops"]) {
     lon += s.lon;
   });
   const c = { lat: lat / stops.length, lon: lon / stops.length };
-  let maxKm = 250;
+  let maxKm = 60;
   stops.forEach((s) => {
     const km = pathKm([
       [c.lon, c.lat],
@@ -68,7 +71,7 @@ function fitFactor(stops: Project["stops"]) {
     ]);
     maxKm = Math.max(maxKm, km);
   });
-  return Math.max(0.46, Math.min(2.4, zoomFor(maxKm * 2.15)));
+  return Math.max(0.46, Math.min(10, zoomFor(maxKm * 2.15)));
 }
 
 function centroid(stops: Project["stops"]) {
@@ -1694,9 +1697,9 @@ export function drawFrame(
   let rotation: [number, number, number] = [-frame.camera.lon, -frame.camera.lat, 0];
 
   if (cameraView !== "top") {
-    // Keep curved Earth horizon & blue atmosphere visible across the top/top-left even when deeply zoomed in!
+    // Keep curved Earth horizon & blue atmosphere visible across the top/top-left while allowing deep zoom for small towns
     const effFactor =
-      rawFactor <= 0.85 ? rawFactor : 0.85 + Math.pow(rawFactor - 0.85, 0.78) * 0.92;
+      rawFactor <= 1.2 ? rawFactor : 1.2 + Math.pow(rawFactor - 1.2, 0.92) * 0.95;
     globeRadius = effFactor * minDim;
 
     const outroEase =
@@ -2036,7 +2039,8 @@ export function drawFrame(
         : 0;
     const flag = project.style.showCountryFlags && stop.code ? flagEmoji(stop.code) : "";
     const primary = `${stop.emoji ? `${stop.emoji} ` : ""}${stop.name}`;
-    const secondary = [flag, stop.country].filter(Boolean).join("  ");
+    const countryName = internationalCountryName(stop.code, stop.country);
+    const secondary = [flag, countryName].filter(Boolean).join("  ");
 
     const titleFont = Math.round(Math.max(14, w / 46) * (isActive ? 1.06 : 0.94));
     const subFont = Math.round(titleFont * 0.72);
@@ -2189,35 +2193,56 @@ export function drawFrame(
     }
   });
 
-  // 10. Total Distance Travelled Summary Pill towards the end of the animation
+  // 10. Final Route Stats Pill towards the end of the animation
+  // Format: "# of Countries | # of cities | total distance travelled"
+  // e.g. "5 Countries | 10 Cities | 10,000 kms travelled"
   if (frame.totalDistanceKm != null && frame.outroProgress > 0.02) {
     const alpha = Math.min(1, frame.outroProgress);
     const totalVal =
       project.style.units === "mi"
         ? Math.round(frame.totalDistanceKm * 0.621371)
         : Math.round(frame.totalDistanceKm);
-    const unitLabel = project.style.units === "mi" ? "mi" : "km";
-    const valueText = `${totalVal.toLocaleString()} ${unitLabel}`;
-    const visitedCount = countVisitedPlaces(project.stops);
-    const captionText = `TOTAL DISTANCE · ${visitedCount} ${visitedCount === 1 ? "PLACE" : "PLACES"}`;
+    const unitLabel =
+      project.style.units === "mi"
+        ? totalVal === 1
+          ? "mile"
+          : "miles"
+        : totalVal === 1
+        ? "km"
+        : "kms";
+    const uniqueCountries = countUniqueCountries(project.stops);
+    const uniqueCities = countUniqueCities(project.stops);
+    const countryText = `${uniqueCountries} ${uniqueCountries === 1 ? "Country" : "Countries"}`;
+    const cityText = `${uniqueCities} ${uniqueCities === 1 ? "City" : "Cities"}`;
+    const distText = `${totalVal.toLocaleString()} ${unitLabel} travelled`;
+    const statsText = `${countryText}  |  ${cityText}  |  ${distText}`;
 
-    const bigFont = Math.round(Math.max(18, w / 34));
-    const capFont = Math.round(Math.max(10, w / 76));
+    const bigFont = Math.round(Math.max(14, Math.min(w / 38, 28)));
+    const capFont = Math.round(Math.max(9.5, w / 82));
+    const captionText = "TRIP SUMMARY";
 
     ctx.save();
     ctx.font = `800 ${bigFont}px Inter, system-ui, sans-serif`;
-    const valW = ctx.measureText(valueText).width;
+    let valW = ctx.measureText(statsText).width;
+    let finalBigFont = bigFont;
+    const maxAllowedW = w - Math.max(48, w * 0.08);
+    if (valW > maxAllowedW) {
+      finalBigFont = Math.max(11, Math.floor((bigFont * maxAllowedW) / valW));
+      ctx.font = `800 ${finalBigFont}px Inter, system-ui, sans-serif`;
+      valW = ctx.measureText(statsText).width;
+    }
+
     ctx.font = `700 ${capFont}px Inter, system-ui, sans-serif`;
     const capW = ctx.measureText(captionText).width;
 
-    const pillW = Math.max(valW, capW) + Math.max(36, w / 18);
-    const pillH = bigFont + capFont + Math.max(20, w / 42);
+    const pillW = Math.max(valW, capW) + Math.max(36, w / 20);
+    const pillH = finalBigFont + capFont + Math.max(20, w / 44);
     const slideY = (1 - alpha) * 14;
     const pillX = w / 2 - pillW / 2;
     const pillY = h - pillH - Math.max(22, h * 0.05) + slideY;
 
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = palette.stars ? "rgba(14, 19, 30, 0.86)" : "rgba(255, 255, 255, 0.94)";
+    ctx.fillStyle = palette.stars ? "rgba(14, 19, 30, 0.88)" : "rgba(255, 255, 255, 0.94)";
     ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
     ctx.shadowBlur = 22;
     ctx.shadowOffsetY = 6;
@@ -2235,13 +2260,13 @@ export function drawFrame(
     ctx.fillStyle = palette.stars ? "rgba(148, 163, 184, 0.95)" : "rgba(71, 85, 105, 0.9)";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillText(captionText, w / 2, pillY + Math.max(8, pillH * 0.16));
+    ctx.fillText(captionText, w / 2, pillY + Math.max(7, pillH * 0.15));
 
-    // Total distance readout
-    ctx.font = `800 ${bigFont}px Inter, system-ui, sans-serif`;
+    // Final stats readout: "# of Countries | # of Cities | total distance travelled"
+    ctx.font = `800 ${finalBigFont}px Inter, system-ui, sans-serif`;
     ctx.fillStyle = label;
     ctx.textBaseline = "bottom";
-    ctx.fillText(valueText, w / 2, pillY + pillH - Math.max(7, pillH * 0.13));
+    ctx.fillText(statsText, w / 2, pillY + pillH - Math.max(7, pillH * 0.14));
     ctx.restore();
   }
 

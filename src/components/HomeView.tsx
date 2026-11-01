@@ -6,7 +6,7 @@ import { PageShell } from "./PageShell";
 import { GlobeStage } from "./GlobeStage";
 import { HERO_PROJECT, TEMPLATES } from "@/lib/templates";
 import { THEMES, applyTheme, transportMeta, type ThemeId } from "@/lib/types";
-import { countVisitedPlaces, flagEmoji, haversineKm } from "@/lib/geo";
+import { countUniqueCities, countUniqueCountries, flagEmoji, formatRouteStatsSummary, haversineKm } from "@/lib/geo";
 import { useAuth } from "./AuthProvider";
 import { useI18n } from "@/lib/i18n";
 
@@ -130,8 +130,7 @@ export function HomeView() {
             />
             <div className="hero-globe-overlay-top">
               <span className="telemetry-pill">
-                📍 {countVisitedPlaces(liveProject.stops)}{" "}
-                {countVisitedPlaces(liveProject.stops) === 1 ? "place" : "places"} · {routeDistanceKm.toLocaleString()} km
+                📍 {formatRouteStatsSummary(liveProject.stops, routeDistanceKm)}
               </span>
               <span className="telemetry-pill">
                 {transportMeta(liveProject.legs[0]?.transport ?? "plane").icon}{" "}
@@ -242,7 +241,8 @@ export function HomeView() {
 
         <div className="example-grid">
           {TEMPLATES.slice(0, 3).map((template) => {
-            const visited = countVisitedPlaces(template.project.stops);
+            const countries = countUniqueCountries(template.project.stops);
+            const cities = countUniqueCities(template.project.stops);
             return (
               <div key={template.id} className="example-card showcase-card">
                 <div className="card-globe-preview">
@@ -252,7 +252,7 @@ export function HomeView() {
                 <div className="example-copy">
                   <div className="card-meta-row">
                     <span>
-                      {visited} {visited === 1 ? "place" : "places"}
+                      {countries} {countries === 1 ? "Country" : "Countries"} · {cities} {cities === 1 ? "City" : "Cities"}
                     </span>
                     <span>·</span>
                     <span>

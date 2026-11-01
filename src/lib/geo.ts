@@ -192,37 +192,166 @@ export function flagEmoji(code: string) {
     .replace(/./g, (char) => String.fromCodePoint(127397 + char.charCodeAt(0)));
 }
 
+const englishRegionDisplay =
+  typeof Intl !== "undefined" && typeof Intl.DisplayNames !== "undefined"
+    ? new Intl.DisplayNames(["en"], { type: "region" })
+    : null;
+
+const LOCAL_COUNTRY_FALLBACKS: Record<string, string> = {
+  danmark: "Denmark",
+  sverige: "Sweden",
+  norge: "Norway",
+  suomi: "Finland",
+  deutschland: "Germany",
+  österreich: "Austria",
+  schweiz: "Switzerland",
+  suisse: "Switzerland",
+  svizzera: "Switzerland",
+  italia: "Italy",
+  españa: "Spain",
+  portugal: "Portugal",
+  nederland: "Netherlands",
+  belgië: "Belgium",
+  belgique: "Belgium",
+  polska: "Poland",
+  česko: "Czechia",
+  "česká republika": "Czechia",
+  magyarország: "Hungary",
+  hrvatska: "Croatia",
+  slovenija: "Slovenia",
+  slovensko: "Slovakia",
+  românia: "Romania",
+  türkiye: "Turkey",
+  ελλάδα: "Greece",
+  hellas: "Greece",
+  ísland: "Iceland",
+  éire: "Ireland",
+  lietuva: "Lithuania",
+  latvija: "Latvia",
+  eesti: "Estonia",
+};
+
+/**
+ * Returns the international English country name for a stop given its ISO alpha-2 code
+ * or fallback country string (converting local names like "Danmark" -> "Denmark", "Sverige" -> "Sweden").
+ */
+export function internationalCountryName(code?: string, rawCountry?: string): string {
+  const cleanCode = (code || "").trim().toUpperCase();
+  if (cleanCode.length === 2 && englishRegionDisplay) {
+    try {
+      const resolved = englishRegionDisplay.of(cleanCode);
+      if (resolved && resolved !== cleanCode) return resolved;
+    } catch {
+      /* fall through */
+    }
+  }
+  const trimmed = (rawCountry || "").trim();
+  if (!trimmed) return "";
+  const mapped = LOCAL_COUNTRY_FALLBACKS[trimmed.toLowerCase()];
+  return mapped || trimmed;
+}
+
 export function isSamePlace(
-  a: { name?: string; country?: string; lat: number; lon: number },
-  b: { name?: string; country?: string; lat: number; lon: number }
+  a: { name?: string; country?: string; code?: string; lat: number; lon: number },
+  b: { name?: string; country?: string; code?: string; lat: number; lon: number }
 ): boolean {
   const nameA = a.name?.trim().toLowerCase() || "";
   const nameB = b.name?.trim().toLowerCase() || "";
   if (nameA && nameB && nameA !== "pinned place" && nameA === nameB) {
-    const countryA = a.country?.trim().toLowerCase() || "";
-    const countryB = b.country?.trim().toLowerCase() || "";
+    const countryA = internationalCountryName(a.code, a.country).toLowerCase();
+    const countryB = internationalCountryName(b.code, b.country).toLowerCase();
     if (!countryA || !countryB || countryA === countryB) return true;
   }
-  return haversineKm(a, b) <= 35;
+  return haversineKm(a, b) <= 15;
 }
 
 /**
- * Counts destinations visited along a route:
- * - Start location (stops[0]) is the departure origin and is not counted as a visited destination.
- * - Any subsequent stop that returns to the start location (e.g. round-trip end) is also excluded.
- * - All legs' distances are still counted separately in full.
+ * Counts unique cities/places visited along a route:
+ * - Start location (stops[0]) is the departure home city and is not counted as a visited destination
+ *   (nor when returning to it on a round trip).
+ * - Returning via the same city/place is not counted double.
  */
-export function countVisitedPlaces(
-  stops: { name?: string; country?: string; lat: number; lon: number }[]
+export function countUniqueCities(
+  stops: { name?: string; country?: string; code?: string; lat: number; lon: number }[]
 ): number {
-  if (stops.length <= 1) return stops.length;
-  const start = stops[0];
-  let visited = 0;
+  if (stops.length === 0) return 0;
+  if (stops.length === 1) return 1;
+  const origin = stops[0];
+  const unique: { name?: string; country?: string; code?: string; lat: number; lon: number }[] = [];
   for (let i = 1; i < stops.length; i++) {
-    if (!isSamePlace(start, stops[i])) {
-      visited++;
+    const stop = stops[i];
+    if (isSamePlace(origin, stop)) continue;
+    if (!unique.some((existing) => isSamePlace(existing, stop))) {
+      unique.push(stop);
     }
   }
-  return visited;
+  return unique.length > 0 ? unique.length : 1;
+}
+
+/**
+ * Counts unique destination countries visited along a route:
+ * - The home country (stops[0]'s country) is excluded if the starting city is the only place
+ *   visited in that country (including returning to the starting city at the end).
+ * - If you also visit other cities within your home country during the trip, or if the entire trip
+ *   is domestic within 1 country, the country is included.
+ * - Returning via the same country is not counted double.
+ */
+export function countUniqueCountries(
+  stops: { name?: string; country?: string; code?: string; lat: number; lon: number }[]
+): number {
+  if (stops.length === 0) return 0;
+  const countryKey = (stop: { country?: string; code?: string }) => {
+    const code = (stop.code || "").trim().toUpperCase();
+    const country = internationalCountryName(code, stop.country).toLowerCase();
+    return code || country;
+  };
+
+  if (stops.length === 1) return 1;
+
+  const origin = stops[0];
+  const destinationCountries = new Set<string>();
+  for (let i = 1; i < stops.length; i++) {
+    const stop = stops[i];
+    if (isSamePlace(origin, stop)) continue;
+    const key = countryKey(stop);
+    if (key) {
+      destinationCountries.add(key);
+    }
+  }
+
+  if (destinationCountries.size > 0) {
+    return destinationCountries.size;
+  }
+
+  const originKey = countryKey(origin);
+  return originKey ? 1 : 1;
+}
+
+/**
+ * Formats the route summary string:
+ * "# of Countries | # of cities | total distance travelled"
+ * e.g. "5 Countries | 10 Cities | 10,000 kms travelled"
+ */
+export function formatRouteStatsSummary(
+  stops: { name?: string; country?: string; code?: string; lat: number; lon: number }[],
+  distanceKm: number,
+  units: "km" | "mi" | "none" = "km"
+): string {
+  const countries = countUniqueCountries(stops);
+  const cities = countUniqueCities(stops);
+  const countryPart = `${countries} ${countries === 1 ? "Country" : "Countries"}`;
+  const cityPart = `${cities} ${cities === 1 ? "City" : "Cities"}`;
+  if (units === "none") {
+    return `${countryPart} | ${cityPart}`;
+  }
+  const distVal = units === "mi" ? Math.round(distanceKm * 0.621371) : Math.round(distanceKm);
+  const unitLabel = units === "mi" ? (distVal === 1 ? "mile" : "miles") : distVal === 1 ? "km" : "kms";
+  return `${countryPart} | ${cityPart} | ${distVal.toLocaleString()} ${unitLabel} travelled`;
+}
+
+export function countVisitedPlaces(
+  stops: { name?: string; country?: string; code?: string; lat: number; lon: number }[]
+): number {
+  return countUniqueCities(stops);
 }
 

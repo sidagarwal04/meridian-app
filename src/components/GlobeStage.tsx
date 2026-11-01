@@ -196,9 +196,13 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
   }, [photoKey, shown.stops]);
 
   const liveAudioRef = useRef<AudioSession | null>(null);
+  const audioReqIdRef = useRef(0);
   const lastSegKeyRef = useRef<string>("");
 
+  const [ended, setEnded] = useState(false);
+
   const stopLiveAudio = () => {
+    audioReqIdRef.current++;
     liveAudioRef.current?.stop();
     liveAudioRef.current = null;
     lastSegKeyRef.current = "";
@@ -250,16 +254,23 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
   const startLiveAudioIfEnabled = () => {
     stopLiveAudio();
     if (!enableAudioRef.current) return;
+    const reqId = audioReqIdRef.current;
     unlockAudio();
     const curShown = shownRef.current;
     createAudioSession({
       music: curShown.style.music,
       soundEffects: curShown.style.soundEffects ?? true,
     }).then((session) => {
-      if (!playing.current || recording.current || !enableAudioRef.current) {
+      if (
+        audioReqIdRef.current !== reqId ||
+        !playing.current ||
+        recording.current ||
+        !enableAudioRef.current
+      ) {
         session?.stop();
         return;
       }
+      liveAudioRef.current?.stop();
       liveAudioRef.current = session;
       syncAudioAtTime(session, elapsed.current);
     });
@@ -285,7 +296,9 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
       raf.current = requestAnimationFrame(step(id));
       return;
     }
+    paint(Math.max(0, curDuration - 0.001), null);
     stopLiveAudio();
+    setEnded(true);
     onEndedRef.current?.();
   };
 
@@ -297,6 +310,7 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     elapsed.current = 0;
     started.current = null;
     playing.current = true;
+    setEnded(false);
     startLiveAudioIfEnabled();
     raf.current = requestAnimationFrame(step(id));
   };
@@ -323,10 +337,12 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     stopLiveAudio();
     if (!ready || !countries) return;
     if (play === "freeze-end") {
+      setEnded(false);
       paint(Math.max(0, duration - 0.05), null);
       return;
     }
     if (play === "auto" || play === "loop") {
+      setEnded(false);
       const id = ++playId.current;
       lastSegKeyRef.current = "";
       elapsed.current = 0;
@@ -335,6 +351,7 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
       startLiveAudioIfEnabled();
       raf.current = requestAnimationFrame(step(id));
     } else {
+      setEnded(false);
       paint(0, null);
     }
     return () => {
@@ -500,6 +517,13 @@ export const GlobeStage = forwardRef<GlobeHandle, Props>(function GlobeStage(
     <div className={className ? `stage-wrap ${className}` : "stage-wrap"}>
       <canvas ref={canvasRef} className="stage-canvas" />
       {!ready ? <div className="stage-wait">Tracing the route…</div> : null}
+      {ended && play === "auto" ? (
+        <div className="stage-replay-overlay">
+          <button type="button" className="stage-replay-btn" onClick={playNow}>
+            ↻ Preview again
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 });

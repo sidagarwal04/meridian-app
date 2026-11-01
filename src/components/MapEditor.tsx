@@ -2,7 +2,7 @@
 
 import { geoGraticule, geoNaturalEarth1, geoOrthographic, geoPath, type GeoProjection } from "d3-geo";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { countVisitedPlaces, flagEmoji, greatCircle, haversineKm } from "@/lib/geo";
+import { flagEmoji, formatRouteStatsSummary, greatCircle, haversineKm, internationalCountryName } from "@/lib/geo";
 import { drawShaderGlobe } from "@/lib/globeShader";
 import { drawSatelliteBiomeShading, drawTransportVehicle } from "@/lib/render";
 import { THEMES, transportMeta, type Leg, type Stop, type ThemeId } from "@/lib/types";
@@ -800,10 +800,7 @@ export function MapEditor({
           </button>
         </div>
         <div className="map-stats-pill">
-          <span>
-            {countVisitedPlaces(stops)} {countVisitedPlaces(stops) === 1 ? "place" : "places"}
-          </span>
-          {totalKm > 0 ? <span>· {totalKm.toLocaleString()} km</span> : null}
+          <span>{formatRouteStatsSummary(stops, totalKm)}</span>
           {cursorCoord ? (
             <span className="map-coord-readout">
               · {cursorCoord.lat.toFixed(1)}°, {cursorCoord.lon.toFixed(1)}°
@@ -856,7 +853,9 @@ export function MapEditor({
                 {selectedStop.code ? `${flagEmoji(selectedStop.code)} ` : ""}
                 {selectedStop.name}
               </strong>
-              {selectedStop.country ? <small>{selectedStop.country}</small> : null}
+              {selectedStop.country || selectedStop.code ? (
+                <small>{internationalCountryName(selectedStop.code, selectedStop.country)}</small>
+              ) : null}
             </div>
             <button
               type="button"
