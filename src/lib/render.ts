@@ -11,7 +11,9 @@ import {
 } from "./geo";
 import { drawShaderGlobe } from "./globeShader";
 import { THEMES, transportMeta, type Project, type Style, type ThemeId, type Transport } from "./types";
-import type { CountryShape } from "./world";
+import { isCountryInBounds, type CountryShape } from "./world";
+
+const DEFAULT_GRATICULE = geoGraticule()();
 
 export type Frame = {
   camera: { lon: number; lat: number; factor: number };
@@ -59,13 +61,13 @@ function lerpLog(a: number, b: number, t: number) {
 // span ~38-45% of the viewport instead of clustering together.
 // Note: On Earth (R = 6371 km), screenFraction ≈ factor * (km / 6371), so factor ≈ 2650 / km for local hops.
 function zoomFor(km: number) {
-  const d = Math.max(2.5, km || 700);
+  const d = Math.max(3, km || 700);
   if (d >= 8500) return 0.5;
   if (d >= 4500) return 0.5 + ((8500 - d) / 4000) * 0.28; // 0.50 -> 0.78
   if (d >= 2000) return 0.78 + ((4500 - d) / 2500) * 0.57; // 0.78 -> 1.35
-  if (d >= 900) return 1.35 + ((2000 - d) / 1100) * 1.6; // 1.35 -> 2.95
-  // Below 900 km, scale inversely with distance so every regional/city/town leg spans ~40-44% of minDim on screen
-  return Math.min(480, 2655 / d);
+  if (d >= 900) return 1.35 + ((2000 - d) / 1100) * 1.45; // 1.35 -> 2.80
+  // Below 900 km, scale inversely with distance so every regional/city/town leg spans ~40% of minDim on screen
+  return Math.min(160, 2520 / d);
 }
 
 function fitFactor(stops: Project["stops"]) {
@@ -1754,38 +1756,47 @@ export function drawFrame(
   }
 
   const projection = geoOrthographic()
-    .precision(0.3)
+    .precision(rawFactor > 5 ? 0 : 0.3)
     .rotate(rotation)
     .translate([cx, cy])
     .scale(globeRadius);
+  if (rawFactor > 1.35) {
+    projection.clipExtent([
+      [-48, -48],
+      [w + 48, h + 48],
+    ]);
+  }
   const path = geoPath(projection, ctx);
 
+  // Compute viewport lat/lon bounds when zoomed in to cull off-screen countries & bound graticules
+  const degSpan = Math.min(85, ((180 / Math.PI) / Math.max(0.5, rawFactor)) * 2.1);
+  const cosLat = Math.max(0.18, Math.cos((frame.camera.lat * Math.PI) / 180));
+  const lonSpan = Math.min(180, degSpan / cosLat);
+  const minVisLon = frame.camera.lon - lonSpan;
+  const maxVisLon = frame.camera.lon + lonSpan;
+  const minVisLat = Math.max(-88, frame.camera.lat - degSpan);
+  const maxVisLat = Math.min(88, frame.camera.lat + degSpan);
+  const visibleCountries =
+    rawFactor > 2.2
+      ? countries.filter((c) => isCountryInBounds(c, minVisLon, minVisLat, maxVisLon, maxVisLat))
+      : countries;
+
   // Render high-resolution WebGL 3D Satellite & Topographic Relief Globe (with 2D fallback while loading)
-  // At extreme local zoom (rawFactor > 60), skip WebGL float inversion and render pure high-precision 2D vector coastlines
-  const renderedWithShader =
-    rawFactor <= 60 &&
-    drawShaderGlobe(ctx, {
-      w,
-      h,
-      cx,
-      cy,
-      scale: globeRadius,
-      rotation,
-      theme: project.style.theme,
-      projMode: "globe",
-      time,
-    });
+  const renderedWithShader = drawShaderGlobe(ctx, {
+    w,
+    h,
+    cx,
+    cy,
+    scale: globeRadius,
+    rotation,
+    theme: project.style.theme,
+    projMode: "globe",
+    time,
+  });
 
-  // When zoomed in close (rawFactor > 3.2), blend in crisp vector ocean & land polygons from countries-50m.json
-  // so narrow straits (like Øresund between Helsingør & Helsingborg) and coastal towns are razor-sharp
-  const vectorDetailAlpha = renderedWithShader ? smooth((rawFactor - 3.2) / 4.2) : 1;
-
-  if (vectorDetailAlpha > 0.01) {
-    ctx.save();
-    ctx.globalAlpha = vectorDetailAlpha;
-
+  if (!renderedWithShader) {
     // Crisp atmospheric horizon halo around the 3D sphere (when sphere rim is on screen)
-    if (!renderedWithShader && palette.stars && rawFactor < 4) {
+    if (palette.stars && rawFactor <= 2.2) {
       const corona = ctx.createRadialGradient(cx, cy, globeRadius * 0.94, cx, cy, globeRadius * 1.14);
       corona.addColorStop(0, "rgba(96, 165, 250, 0.26)");
       corona.addColorStop(0.45, "rgba(37, 99, 235, 0.09)");
@@ -1797,16 +1808,22 @@ export function drawFrame(
     }
 
     // 1. Deep Bathymetric Ocean Sphere
-    ctx.beginPath();
-    path({ type: "Sphere" } as never);
     ctx.fillStyle = palette.ocean;
-    ctx.fill();
-
-    if (palette.stars) {
-      ctx.save();
+    if (rawFactor > 2.2) {
+      ctx.fillRect(0, 0, w, h);
+    } else {
       ctx.beginPath();
       path({ type: "Sphere" } as never);
-      ctx.clip();
+      ctx.fill();
+    }
+
+    if (palette.stars && rawFactor <= 3.5) {
+      ctx.save();
+      if (rawFactor <= 2.2) {
+        ctx.beginPath();
+        path({ type: "Sphere" } as never);
+        ctx.clip();
+      }
       const gradRadius = Math.min(globeRadius * 1.04, Math.max(w, h) * 1.5);
       const oceanLight = ctx.createRadialGradient(
         w * 0.35,
@@ -1827,16 +1844,18 @@ export function drawFrame(
     // 2. Shallow Coastal Shelf Bathymetry Glow around landmasses
     if (isSatelliteLook) {
       ctx.save();
-      ctx.beginPath();
-      path({ type: "Sphere" } as never);
-      ctx.clip();
+      if (rawFactor <= 2.2) {
+        ctx.beginPath();
+        path({ type: "Sphere" } as never);
+        ctx.clip();
+      }
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      countries.forEach((country) => {
+      visibleCountries.forEach((country) => {
         ctx.beginPath();
         path(country.feature as never);
         ctx.strokeStyle = "rgba(56, 189, 248, 0.16)";
-        ctx.lineWidth = Math.min(28, Math.max(4, globeRadius * 0.012));
+        ctx.lineWidth = Math.min(20, Math.max(4, globeRadius * 0.012));
         ctx.stroke();
       });
       ctx.restore();
@@ -1845,16 +1864,16 @@ export function drawFrame(
     // 3. Landmasses Base Fill + Multi-Biome Satellite Terrain Shading
     ctx.save();
     ctx.beginPath();
-    countries.forEach((country) => {
+    visibleCountries.forEach((country) => {
       path(country.feature as never);
     });
     ctx.fillStyle = palette.land;
     ctx.fill();
 
-    ctx.clip();
-    drawSatelliteBiomeShading(ctx, projection, globeRadius, project.style.theme);
-    ctx.restore();
-
+    if (rawFactor <= 3.5) {
+      ctx.clip();
+      drawSatelliteBiomeShading(ctx, projection, globeRadius, project.style.theme);
+    }
     ctx.restore();
   }
 
@@ -1869,7 +1888,7 @@ export function drawFrame(
 
   // 4. Country Borders + Visited / Active Country Crisp White Border & Subtle Tint (mult.dev style)
   const highlightedCountries: CountryShape[] = [];
-  countries.forEach((country) => {
+  visibleCountries.forEach((country) => {
     const hot = Boolean(country.code && visited.has(country.code));
     if (hot) {
       highlightedCountries.push(country);
@@ -1902,39 +1921,49 @@ export function drawFrame(
     ctx.restore();
   });
 
-  // Adaptive multi-scale graticule grid so deep regional/town zoom shows a crisp coordinate grid
-  const graticuleStep: [number, number] =
-    rawFactor > 120
-      ? [0.05, 0.05]
-      : rawFactor > 35
-      ? [0.1, 0.1]
-      : rawFactor > 10
-      ? [0.5, 0.5]
-      : rawFactor > 3.5
-      ? [2, 2]
-      : [10, 10];
+  // 4b. Viewport-bounded graticule grid (zero off-screen subdivision overhead)
   ctx.beginPath();
-  path(geoGraticule().step(graticuleStep)());
+  if (rawFactor <= 2.5) {
+    path(DEFAULT_GRATICULE);
+  } else {
+    const stepDeg =
+      rawFactor > 90 ? 0.1 : rawFactor > 30 ? 0.25 : rawFactor > 10 ? 0.5 : 2;
+    const snapMinLon = Math.floor(minVisLon / stepDeg) * stepDeg;
+    const snapMaxLon = Math.ceil(maxVisLon / stepDeg) * stepDeg;
+    const snapMinLat = Math.max(-85, Math.floor(minVisLat / stepDeg) * stepDeg);
+    const snapMaxLat = Math.min(85, Math.ceil(maxVisLat / stepDeg) * stepDeg);
+    path(
+      geoGraticule()
+        .extent([
+          [snapMinLon, snapMinLat],
+          [snapMaxLon, snapMaxLat],
+        ])
+        .step([stepDeg, stepDeg])
+        .precision(stepDeg * 0.5)()
+    );
+  }
   ctx.strokeStyle = palette.stars
     ? rawFactor > 10
-      ? "rgba(255,255,255,0.055)"
+      ? "rgba(255,255,255,0.05)"
       : "rgba(255,255,255,0.028)"
     : "rgba(30,40,50,0.05)";
   ctx.lineWidth = 0.5;
   ctx.stroke();
 
-  // 5. Crisp 3D Atmospheric Horizon Rim Line
-  ctx.save();
-  ctx.beginPath();
-  path({ type: "Sphere" } as never);
-  ctx.strokeStyle = palette.stars ? "rgba(125, 211, 252, 0.52)" : "rgba(40,50,60,0.28)";
-  ctx.lineWidth = Math.max(1.5, w / 580);
-  if (palette.stars) {
-    ctx.shadowColor = "rgba(56, 189, 248, 0.65)";
-    ctx.shadowBlur = 12;
+  // 5. Crisp 3D Atmospheric Horizon Rim Line (only when the sphere rim is visible on screen)
+  if (rawFactor <= 2.2) {
+    ctx.save();
+    ctx.beginPath();
+    path({ type: "Sphere" } as never);
+    ctx.strokeStyle = palette.stars ? "rgba(125, 211, 252, 0.52)" : "rgba(40,50,60,0.28)";
+    ctx.lineWidth = Math.max(1.5, w / 580);
+    if (palette.stars) {
+      ctx.shadowColor = "rgba(56, 189, 248, 0.65)";
+      ctx.shadowBlur = 12;
+    }
+    ctx.stroke();
+    ctx.restore();
   }
-  ctx.stroke();
-  ctx.restore();
 
   // 6. Vibrant Electric Blue Route Path with 3D Ground Shadow & Outer Glow
   const strokeRoute = (lines: [number, number][][], alpha: number, width: number, dash: boolean, glow: boolean) => {

@@ -6,7 +6,9 @@ import { flagEmoji, formatRouteStatsSummary, greatCircle, haversineKm, internati
 import { drawShaderGlobe } from "@/lib/globeShader";
 import { drawSatelliteBiomeShading, drawTransportVehicle } from "@/lib/render";
 import { THEMES, transportMeta, type Leg, type Stop, type ThemeId } from "@/lib/types";
-import { loadCountries, type CountryShape } from "@/lib/world";
+import { isCountryInBounds, loadCountries, type CountryShape } from "@/lib/world";
+
+const EDITOR_GRATICULE = geoGraticule()();
 
 function isValidCoord(lat: number, lon: number) {
   return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 85.5 && Math.abs(lon) <= 180;
@@ -330,10 +332,16 @@ export function MapEditor({
 
         sphereBoundsRef.current = { cx, cy, r: globeRadius };
         projection = geoOrthographic()
-          .precision(0.3)
+          .precision(safeZoom > 6 ? 0 : 0.3)
           .rotate(rotation)
           .translate([cx, cy])
           .scale(globeRadius);
+        if (safeZoom > 2.2) {
+          projection.clipExtent([
+            [-48, -48],
+            [width + 48, height + 48],
+          ]);
+        }
 
         shaderRendered = drawShaderGlobe(ctx, {
           w: width,
@@ -355,8 +363,15 @@ export function MapEditor({
         const scale = baseScale * safeZoom;
 
         projection = geoNaturalEarth1()
+          .precision(safeZoom > 6 ? 0 : 0.3)
           .scale(scale)
           .translate([cx, cy]);
+        if (safeZoom > 2.2) {
+          projection.clipExtent([
+            [-48, -48],
+            [width + 48, height + 48],
+          ]);
+        }
 
         shaderRendered = drawShaderGlobe(ctx, {
           w: width,
@@ -376,6 +391,25 @@ export function MapEditor({
       const visitedCodes = new Set(validStops.map((s) => s.code).filter(Boolean));
       const isSatelliteLook = theme === "earth";
 
+      const visibleCountries =
+        projView === "globe" && safeZoom > 3.5
+          ? (() => {
+              const effFactor = 0.56 * safeZoom;
+              const degSpan = Math.min(85, ((180 / Math.PI) / effFactor) * 2.2);
+              const cosLat = Math.max(0.18, Math.cos((globeCenter.lat * Math.PI) / 180));
+              const lonSpan = Math.min(180, degSpan / cosLat);
+              return countries.filter((c) =>
+                isCountryInBounds(
+                  c,
+                  globeCenter.lon - lonSpan,
+                  Math.max(-88, globeCenter.lat - degSpan),
+                  globeCenter.lon + lonSpan,
+                  Math.min(88, globeCenter.lat + degSpan)
+                )
+              );
+            })()
+          : countries;
+
       if (!shaderRendered) {
         // Fallback 2D canvas fill while WebGL texture loads
         ctx.save();
@@ -387,19 +421,21 @@ export function MapEditor({
 
         ctx.save();
         ctx.beginPath();
-        countries.forEach((country) => {
+        visibleCountries.forEach((country) => {
           path(country.feature as never);
         });
         ctx.fillStyle = palette.land;
         ctx.fill();
-        ctx.clip();
-        drawSatelliteBiomeShading(ctx, projection, Math.min(width, height) * safeZoom, theme);
+        if (safeZoom <= 4) {
+          ctx.clip();
+          drawSatelliteBiomeShading(ctx, projection, Math.min(width, height) * safeZoom, theme);
+        }
         ctx.restore();
       }
 
       // Country borders + crisp glowing white outlines on visited countries
       const hotCountries: CountryShape[] = [];
-      countries.forEach((country) => {
+      visibleCountries.forEach((country) => {
         const isVisited = Boolean(country.code && visitedCodes.has(country.code));
         if (isVisited) hotCountries.push(country);
         ctx.beginPath();
@@ -425,23 +461,25 @@ export function MapEditor({
 
       // Graticule
       ctx.beginPath();
-      path(geoGraticule()());
+      path(EDITOR_GRATICULE);
       ctx.strokeStyle = palette.stars ? "rgba(255,255,255,0.035)" : "rgba(30,40,50,0.06)";
       ctx.lineWidth = 0.5;
       ctx.stroke();
 
       // Sphere outer atmospheric rim
-      ctx.save();
-      ctx.beginPath();
-      path({ type: "Sphere" } as never);
-      ctx.strokeStyle = palette.stars ? "rgba(125, 211, 252, 0.48)" : "rgba(71, 85, 105, 0.35)";
-      ctx.lineWidth = 1.5;
-      if (palette.stars && projView === "globe") {
-        ctx.shadowColor = "rgba(56, 189, 248, 0.6)";
-        ctx.shadowBlur = 10;
+      if (projView !== "globe" || safeZoom <= 3.5) {
+        ctx.save();
+        ctx.beginPath();
+        path({ type: "Sphere" } as never);
+        ctx.strokeStyle = palette.stars ? "rgba(125, 211, 252, 0.48)" : "rgba(71, 85, 105, 0.35)";
+        ctx.lineWidth = 1.5;
+        if (palette.stars && projView === "globe") {
+          ctx.shadowColor = "rgba(56, 189, 248, 0.6)";
+          ctx.shadowBlur = 10;
+        }
+        ctx.stroke();
+        ctx.restore();
       }
-      ctx.stroke();
-      ctx.restore();
 
       // Draw curved great-circle route arcs between valid stops
       if (validStops.length > 1) {
